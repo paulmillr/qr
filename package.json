@@ -1,0 +1,59 @@
+{
+  "name": "@paulmillr/qr",
+  "version": "0.1.0",
+  "description": "Minimal node.js & browser QR Code Pattern reader and generator. Supports ascii, term, gif and svg formats",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "index.d.ts.map",
+    "index.ts",
+    "decode.js",
+    "decode.d.ts",
+    "decode.d.ts.map",
+    "decode.ts",
+    "LICENSE",
+    "LICENSE-MIT"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "devDependencies": {
+    "jpeg-js": "0.4.4",
+    "micro-should": "0.4.0",
+    "omggif": "1.0.10",
+    "prettier": "2.6.2",
+    "typescript": "4.7.3"
+  },
+  "author": "Paul Miller (https://paulmillr.com)",
+  "license": "(MIT OR Apache-2.0)",
+  "homepage": "https://github.com/paulmillr/qr",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paulmillr/qr.git"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "prettier --check index.ts",
+    "test": "node test/index.test.js"
+  },
+  "keywords": [
+    "qr",
+    "code",
+    "qr code",
+    "qr pattern",
+    "qr generator",
+    "qr reader",
+    "ascii",
+    "gif",
+    "svg",
+    "camera",
+    "file"
+  ],
+  "funding": [
+    {
+      "type": "individual",
+      "url": "https://paulmillr.com/funding/"
+    }
+  ]
+}
