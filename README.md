@@ -1,11 +1,12 @@
 # paulmillr-qr
 
-Minimal node.js & browser QR Code Pattern reader and generator. Supports ascii, term, gif and svg formats.
+Minimal node.js & browser QR Code Pattern reader and generator.
 
 - 0-dependency
 - Creating is ~1000 lines, single file
 - Reading is ~800 additional lines in a separate file. Supports camera feed and files themselves
 - Ability to read QR in non-browser environments
+- Creating in ASCII, term, gif and svg formats
 - ESM support
 
 Other JS libraries:
