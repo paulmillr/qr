@@ -3,10 +3,9 @@
 Minimal node.js & browser QR Code Pattern reader and generator.
 
 - 0-dependency
-- Creating is ~1000 lines, single file
-- Reading is ~800 additional lines in a separate file. Supports camera feed and files themselves
+- Creating is ~1000 lines, single file. Supports ASCII, term, gif and svg formats
+- Reading is ~800 additional lines in a separate file. Supports camera feed and files
 - Ability to read QR in non-browser environments
-- Creating in ASCII, term, gif and svg formats
 - Extensive tests: cross-testing against 100MB+ of codes
 - ESM support
 
@@ -14,6 +13,8 @@ Other JS libraries:
 
 - Don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser
 - Uncool: [instascan](https://github.com/schmich/instascan) is 1MB+ (zxing compiled to js via emscripten), [qrcode](https://github.com/nuintun/qrcode) modern refactor of jsQR (138 stars)
+
+Interactive demo is available at https://paulmillr.github.io/qr/.
 
 ## Usage
 
@@ -124,6 +125,8 @@ Vectors are preserved in a git repo at [github.com/paulmillr/qr-code-vectors](ht
 
 For testing: accessing camera on iOS Safari requries HTTPS. It means `file:` protocol or non-encrypted `http` can't be used.
 
+The spec is available at [iso.org](https://www.iso.org/standard/62021.html) for 200 CHF.
+
 ## Security
 
 There are multiple ways how single text can be encoded:
@@ -141,9 +144,31 @@ We also always use single segment, which is not too optimal, but reduces fingerp
 
 To improve the behavior, we can cross-test against 3-4 popular libraries.
 
-## Specification
+## Speed
 
-Available at [iso.org](https://www.iso.org/standard/62021.html) for 200 CHF.
+Benchmarks measured with Apple M2 on MacOS 13 with node.js 19.
+
+```
+======== encode/ascii ========
+encode/noble x 1,794 ops/sec @ 557μs/op
+encode/qrcode-generator x 3,128 ops/sec @ 319μs/op ± 1.12% (min: 293μs, max: 3ms)
+encode/nuintun x 1,872 ops/sec @ 533μs/op
+======== encode/gif ========
+encode/noble x 1,771 ops/sec @ 564μs/op
+encode/qrcode-generator x 1,773 ops/sec @ 563μs/op
+encode/nuintun x 1,883 ops/sec @ 530μs/op
+======== encode: big ========
+encode/noble x 87 ops/sec @ 11ms/op
+encode/qrcode-generator x 124 ops/sec @ 8ms/op
+encode/nuintun x 143 ops/sec @ 6ms/op
+======== decode ========
+decode/noble x 96 ops/sec @ 10ms/op ± 1.39% (min: 9ms, max: 32ms)
+decode/jsqr x 34 ops/sec @ 28ms/op
+decode/nuintun x 35 ops/sec @ 28ms/op
+decode/instascan x 79 ops/sec @ 12ms/op ± 6.73% (min: 9ms, max: 223ms)
+======== Decoding quality ========
+blurred(45):  noble=12 (26.66%) jsqr=13 (28.88%) nuintun=13 (28.88%) instascan=11 (24.44%)
+```
 
 ## License
 
