@@ -276,7 +276,7 @@ class Bitmap {
         return this.data.map((i) => i.map((j) => (j ? darkBG : whiteBG)).join('')).join('\n');
     }
     toSVG() {
-        let out = `<svg xmlns:svg="http://www.w3.org/2000/svg" width="${this.width}" height="${this.height}" version="1.1" xmlns="http://www.w3.org/2000/svg">`;
+        let out = `<svg xmlns:svg="http://www.w3.org/2000/svg" viewBox="0 0 ${this.width} ${this.height}" version="1.1" xmlns="http://www.w3.org/2000/svg">`;
         this.rectRead(0, Infinity, ({ x, y }, val) => {
             if (val)
                 out += `<svg:rect x = "${x}" y = "${y}" width="1" height="1" />`;
