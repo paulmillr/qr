@@ -314,7 +314,7 @@ export class Bitmap {
   toSVG(): string {
     let out = `<svg xmlns:svg="http://www.w3.org/2000/svg" viewBox="0 0 ${this.width} ${this.height}" version="1.1" xmlns="http://www.w3.org/2000/svg">`;
     this.rectRead(0, Infinity, ({ x, y }, val) => {
-      if (val) out += `<svg:rect x = "${x}" y = "${y}" width="1" height="1" />`;
+      if (val) out += `<rect x="${x}" y="${y}" width="1" height="1" />`;
     });
     out += '</svg>';
     return out;
