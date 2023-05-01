@@ -14,7 +14,7 @@ Other JS libraries:
 - Don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser
 - Uncool: [instascan](https://github.com/schmich/instascan) is 1MB+ (zxing compiled to js via emscripten), [qrcode](https://github.com/nuintun/qrcode) modern refactor of jsQR (138 stars)
 
-Interactive demo is available at https://paulmillr.github.io/qr/.
+Interactive demo is available at [paulmillr.com/demos/qr/](https://paulmillr.com/demos/qr/).
 
 ## Usage
 
