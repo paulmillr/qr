@@ -362,11 +362,11 @@ export class Bitmap {
 // Runtime type-checking
 // Low: 7%, medium: 15%, quartile: 25%, high: 30%
 export const ECMode = ['low', 'medium', 'quartile', 'high'] as const;
-export type ErrorCorrection = typeof ECMode[number];
+export type ErrorCorrection = (typeof ECMode)[number];
 export type Version = number; // 1..40
 export type Mask = (0 | 1 | 2 | 3 | 4 | 5 | 6 | 7) & keyof typeof PATTERNS; // 0..7
 export const Encoding = ['numeric', 'alphanumeric', 'byte', 'kanji', 'eci'] as const;
-export type EncodingType = typeof Encoding[number];
+export type EncodingType = (typeof Encoding)[number];
 
 // Various constants & tables
 // prettier-ignore

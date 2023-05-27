@@ -35,6 +35,7 @@
   "scripts": {
     "build": "tsc",
     "lint": "prettier --check index.ts",
+    "format": "prettier --write index.ts",
     "test": "node test/index.test.js"
   },
   "keywords": [
