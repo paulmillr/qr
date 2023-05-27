@@ -10,6 +10,8 @@ jobs:
         node: [18, 20]
     steps:
     - uses: actions/checkout@v3
+      with:
+        submodules: true
     - name: Use Node.js ${{ matrix.node }}
       uses: actions/setup-node@v3
       with:
