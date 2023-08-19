@@ -2,7 +2,7 @@ import { deepStrictEqual } from 'assert';
 import { readFileSync } from 'fs';
 import { gunzipSync } from 'zlib';
 import { should } from 'micro-should';
-import createQR, { _tests } from '../index.js';
+import encodeQR, { _tests } from '../index.js';
 const jsonGZ = (path) => JSON.parse(gunzipSync(readFileSync(path)));
 const TEST_CASES = jsonGZ('./test/vectors/small-vectors.json.gz');
 
@@ -394,7 +394,7 @@ should('Penalty 3', () => {
 });
 
 should('Full API test', () => {
-  const q = createQR('#️⃣🧜‍♂️🏎🔍🔻', 'ascii');
+  const q = encodeQR('#️⃣🧜‍♂️🏎🔍🔻', 'ascii');
   const exp = `
 █████████████████████████████████
 ██ ▄▄▄▄▄ █▄██▀█▀▀▄ ▀   █ ▄▄▄▄▄ ██
@@ -422,13 +422,13 @@ for (let i = 0; i < TEST_CASES.length; i++) {
   const { text: input, out: output, ecc } = v;
   const opt = { ecc };
   should(`small test(${i})`, () => {
-    const q = createQR(input, 'ascii', opt);
+    const q = encodeQR(input, 'ascii', opt);
     deepStrictEqual(q, output);
   });
 }
 
 should('Full API test url', () => {
-  const q = createQR('https://www.youtube.com/watch?v=eBGIQ7ZuuiU', 'ascii');
+  const q = encodeQR('https://www.youtube.com/watch?v=eBGIQ7ZuuiU', 'ascii');
   console.log(q);
   const exp = `
 █████████████████████████████████████

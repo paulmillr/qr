@@ -796,7 +796,7 @@ export type DecodeOpts = {
   qrFn?: (img: Image) => void;
 };
 
-export default function readQR(img: Image, opts: DecodeOpts = {}): string {
+export default function decodeQR(img: Image, opts: DecodeOpts = {}): string {
   for (const field of ['height', 'width'] as const) {
     if (!Number.isSafeInteger(img[field]) || img[field] <= 0)
       throw new Error(`Wrong img.${field}=${img[field]} (${typeof img[field]})`);

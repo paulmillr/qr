@@ -1,7 +1,7 @@
 import { deepStrictEqual } from 'assert';
 import { should } from 'micro-should';
 import { GifReader } from 'omggif';
-import createQR, { _tests } from '../index.js';
+import encodeQR, { _tests } from '../index.js';
 const { Bitmap } = _tests;
 
 const strip = (str) => str.replace(/^\n+/g, '').replace(/\n+$/g, '');
@@ -348,8 +348,8 @@ need web server or other complex tools for testing :(
 should('GIF encode', () => {
   for (let scale = 1; scale < 8; scale++) {
     for (let ver = 1; ver <= 40; ver++) {
-      const q = createQR('hello world?', 'gif', { version: ver, scale: scale });
-      const raw = createQR('hello world?', 'raw', { version: ver, scale: scale });
+      const q = encodeQR('hello world?', 'gif', { version: ver, scale: scale });
+      const raw = encodeQR('hello world?', 'raw', { version: ver, scale: scale });
       deepStrictEqual(GIFtoBitmap(q), raw);
     }
   }

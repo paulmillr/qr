@@ -1,33 +1,30 @@
 # paulmillr-qr
 
-Minimal node.js & browser QR Code Pattern reader and generator.
+Minimal browser and node.js QR Code Pattern encoder & decoder.
 
-- 0-dependency
-- Creating is ~1000 lines, single file. Supports ASCII, term, gif and svg formats
-- Reading is ~800 additional lines in a separate file. Supports camera feed and files
-- Ability to read QR in non-browser environments
-- Extensive tests: cross-testing against 100MB+ of codes
-- ESM support
+- 🔒 Auditable, 0-dependency
+- 🏞️ Encoding supports generating ASCII, term, gif and svg codes
+- 📷 Decoding supports reading from camera feed input, files and non-browser environments
+- 🔍 Extensive tests ensure correctness: 100MB+ of vectors
+- 🪶 Just 1000 lines for encoding and 800 lines for reading
 
-Other JS libraries:
+Interactive demo is available at [paulmillr.com/demos/qr/](https://paulmillr.com/demos/qr/). Other JS libraries are bad, they:
 
-- Don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser
-- Uncool: [instascan](https://github.com/schmich/instascan) is 1MB+ (zxing compiled to js via emscripten), [qrcode](https://github.com/nuintun/qrcode) modern refactor of jsQR (138 stars)
-
-Interactive demo is available at [paulmillr.com/demos/qr/](https://paulmillr.com/demos/qr/).
+- Don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser, [qrcode](https://github.com/nuintun/qrcode) modern refactor of jsQR (138 stars)
+- Too big: [instascan](https://github.com/schmich/instascan) is 1MB+ (zxing compiled to js via emscripten)
 
 ## Usage
 
 > npm install @paulmillr/qr
 
 ```ts
-import createQR from '@paulmillr/qr';
-const gifBytes = createQR('Hello world', 'gif');
+import encodeQR from '@paulmillr/qr';
+const gifBytes = encodeQR('Hello world', 'gif');
 
-// import readQR from '@paulmillr/qr/decode';
+// import decodeQR from '@paulmillr/qr/decode';
 // See separate README section for decoding.
 
-console.log(createQR('Hello world', 'ascii'));
+console.log(encodeQR('Hello world', 'ascii'));
 > █████████████████████████████████████
 > ██ ▄▄▄▄▄ █  ▀▄▄█ ██▀▄▄▄▄█ ▀█ ▄▄▄▄▄ ██
 > ██ █   █ █▀▄▀▄ ▄▄█▄█ ██▀█▀▀█ █   █ ██
@@ -56,11 +53,11 @@ Kotlin usage:
 @JsNonModule
 external object Qr {
     @JsName("default")
-    fun createQR(text: String, output: String = definedExternally, opts: dynamic = definedExternally): Uint8Array
+    fun encodeQR(text: String, output: String = definedExternally, opts: dynamic = definedExternally): Uint8Array
 }
 
 // then
-val bytes = Qr.createQR("text", "gif", js("{ scale: 10 }"))
+val bytes = Qr.encodeQR("text", "gif", js("{ scale: 10 }"))
 val blob = Blob(arrayOf(bytes), BlobPropertyBag("image/gif"))
 val imgSrc = URL.createObjectURL(blob)
 ```
@@ -69,22 +66,24 @@ val imgSrc = URL.createObjectURL(blob)
 
 ```ts
 type QrOpts = {
-  ecc?: 'low', 'medium', 'quartile', 'high'; // Default: 'medium'. Low: 7%, medium: 15%, quartile: 25%, high: 30%
-  encoding?: 'numeric', 'alphanumeric', 'byte', 'kanji', 'eci'; // Force specific encoding. Kanji and ECI are not supported yet
+  // Default: 'medium'. Low: 7%, medium: 15%, quartile: 25%, high: 30%
+  ecc?: 'low' | 'medium' | 'quartile' | 'high';
+  // Force specific encoding. Kanji and ECI are not supported yet
+  encoding?: 'numeric' | 'alphanumeric' | 'byte' | 'kanji' | 'eci';
   version?: number; // 1..40, QR code version
   mask?: number; // 0..7, mask number
   border?: number; // Border size, default 2.
   scale?: number; // Scale to this number. Scale=2 -> each block will be 2x2 pixels
-}
+};
 // - `raw`: 2d boolean array, to use with canvas or other image drawing libraries
 // - `ascii`: ASCII symbols, not all fonts will display it properly
 // - `term`: terminal color escape sequences. 2x bigger than ASCII, but works with all fonts
 // - `gif`: uncompressed gif
 // - `svg`: SVG vector image
 type Output = 'raw' | 'ascii' | 'term' | 'gif' | 'svg';
-function generateQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
-function generateQR(text: string, output: 'ascii' | 'term' | 'svg', opts?: QrOpts): string;
-function generateQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
+function encodeQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
+function encodeQR(text: string, output: 'ascii' | 'term' | 'svg', opts?: QrOpts): string;
+function encodeQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
 ```
 
 ## Decoding
@@ -92,8 +91,8 @@ function generateQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
 ```js
 // gif reader is not included in the package
 // but you can decode raw bitmap
-import writeQR from '@paulmillr/qr';
-import readQR from '@paulmillr/qr/decode.js';
+import encodeQR from '@paulmillr/qr';
+import decodeQR from '@paulmillr/qr/decode.js';
 import { Bitmap } from '@paulmillr/qr';
 
 // Scale so it would be 100x100 instead of 25x25
@@ -101,10 +100,10 @@ const opts = { scale: 4 };
 
 // a) Decode using raw bitmap, dependency-free
 function decodeRawBitmap() {
-  const bmBits = writeQR('Hello world', 'raw', opts);
+  const bmBits = encodeQR('Hello world', 'raw', opts);
   const bm = new Bitmap({ width: bmBits[0].length, height: bmBits.length });
   bm.data = bmBits;
-  const decoded = readQR(bm.toImage());
+  const decoded = decodeQR(bm.toImage());
   console.log('decoded(pixels)', decoded);
 }
 /*
@@ -123,12 +122,14 @@ function parseGIF(image) {
   return { width, height, data };
 }
 function decodeWithExternal() {
-  const gifBytes = writeQR('Hello world', 'gif', opts);
-  const decoded = readQR(parseGIF(gifBytes));
+  const gifBytes = encodeQR('Hello world', 'gif', opts);
+  const decoded = decodeQR(parseGIF(gifBytes));
   console.log('decoded(gif)', decoded);
 }
 
 // c) draw gif/svg to browser canvas and read back
+
+// Convert SVG to PNG
 function svgToPng(svgData, width, height) {
   return new Promise((resolve, reject) => {
     const domparser = new DOMParser();
@@ -146,8 +147,8 @@ function svgToPng(svgData, width, height) {
     const source = serializer.serializeToString(doc);
 
     const img = new Image();
-    img.src = "data:image/svg+xml," + encodeURIComponent(source);
-    img.onload = function() {
+    img.src = 'data:image/svg+xml,' + encodeURIComponent(source);
+    img.onload = function () {
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
@@ -178,7 +179,7 @@ export type DecodeOpts = {
   // Returns RGBA image of detected QR code
   qrFn?: (img: Image) => void;
 };
-export default function decode(img: Image, opts: DecodeOpts = {});
+export default function decodeQR(img: Image, opts: DecodeOpts = {});
 ```
 
 ### Decoding algorithm
@@ -195,14 +196,14 @@ The implemented reader algorithm is inspired by [ZXing](https://github.com/zxing
 
 1. `toBitmap`: convert to bitmap, black & white segments. The slowest part and the most important.
 2. `detect`: find 3 finder patterns and one alignment (for version > 1).
-  This is tricky — they can be rotated and distorted by perspective.
-  Square is not really square — it's quadrilateral, and we have no idea about its size.
-  The best thing we can do is counting runs of a same color and
-  selecting one which looks like pattern; same almost same ratio of runs.
+   This is tricky — they can be rotated and distorted by perspective.
+   Square is not really square — it's quadrilateral, and we have no idea about its size.
+   The best thing we can do is counting runs of a same color and
+   selecting one which looks like pattern; same almost same ratio of runs.
 3. `transform`: once patterns have been found, try to fix perspective and transform quadrilateral to square
 4. `decodeBitmap`: after that, execute encoding in reverse:
-  read information via zig-zag pattern, interleave bytes, correct errors,
-  convert to bits and, finally, read segments from bits to create string.
+   read information via zig-zag pattern, interleave bytes, correct errors,
+   convert to bits and, finally, read segments from bits to create string.
 5. Finished
 
 ### Vectors

@@ -979,14 +979,14 @@ function validateMask(mask: Mask) {
     throw new Error(`Invalid mask=${mask}. Expected number [0..7]`);
 }
 type Output = 'raw' | 'ascii' | 'term' | 'gif' | 'svg';
-export default function createQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
-export default function createQR(
+export default function encodeQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
+export default function encodeQR(
   text: string,
   output: 'ascii' | 'term' | 'svg',
   opts?: QrOpts
 ): string;
-export default function createQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
-export default function createQR(text: string, output: Output = 'raw', opts: QrOpts = {}) {
+export default function encodeQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
+export default function encodeQR(text: string, output: Output = 'raw', opts: QrOpts = {}) {
   const ecc = opts.ecc !== undefined ? opts.ecc : 'medium';
   validateECC(ecc);
   const encoding = opts.encoding !== undefined ? opts.encoding : detectType(text);
