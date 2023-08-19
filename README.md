@@ -18,18 +18,16 @@ Interactive demo is available at [paulmillr.com/demos/qr/](https://paulmillr.com
 
 ## Usage
 
-Use NPM in node.js / browser:
-
 > npm install @paulmillr/qr
 
 ```ts
-import writeQR from '@paulmillr/qr';
-const gifBytes = writeQR('Hello world', 'gif');
+import createQR from '@paulmillr/qr';
+const gifBytes = createQR('Hello world', 'gif');
 
 import readQR from '@paulmillr/qr/decode';
 const decoded = readQR({ height: 120, width: 120, data: gifBytes });
 
-console.log(writeQR('Hello world', 'ascii'));
+console.log(createQR('Hello world', 'ascii'));
 > █████████████████████████████████████
 > ██ ▄▄▄▄▄ █  ▀▄▄█ ██▀▄▄▄▄█ ▀█ ▄▄▄▄▄ ██
 > ██ █   █ █▀▄▀▄ ▄▄█▄█ ██▀█▀▀█ █   █ ██
@@ -51,7 +49,23 @@ console.log(writeQR('Hello world', 'ascii'));
 > ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 ```
 
-Options:
+Kotlin usage:
+
+```kotlin
+@JsModule("@paulmillr/qr")
+@JsNonModule
+external object Qr {
+    @JsName("default")
+    fun createQR(text: String, output: String = definedExternally, opts: dynamic = definedExternally): Uint8Array
+}
+
+// then
+val bytes = Qr.createQR("text", "gif", js("{ scale: 10 }"))
+val blob = Blob(arrayOf(bytes), BlobPropertyBag("image/gif"))
+val imgSrc = URL.createObjectURL(blob)
+```
+
+### Options
 
 ```ts
 type QrOpts = {
@@ -97,7 +111,7 @@ The implemented reader algorithm is inspired by [ZXing](https://github.com/zxing
   convert to bits and, finally, read segments from bits to create string.
 5. Finished
 
-### API
+### Decoding options
 
 ```ts
 export type Point4 = { x: number; y: number }[];
