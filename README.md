@@ -24,8 +24,8 @@ Interactive demo is available at [paulmillr.com/demos/qr/](https://paulmillr.com
 import createQR from '@paulmillr/qr';
 const gifBytes = createQR('Hello world', 'gif');
 
-import readQR from '@paulmillr/qr/decode';
-const decoded = readQR({ height: 120, width: 120, data: gifBytes });
+// import readQR from '@paulmillr/qr/decode';
+// See separate README section for decoding.
 
 console.log(createQR('Hello world', 'ascii'));
 > █████████████████████████████████████
@@ -89,6 +89,100 @@ function generateQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
 
 ## Decoding
 
+```js
+// gif reader is not included in the package
+// but you can decode raw bitmap
+import writeQR from '@paulmillr/qr';
+import readQR from '@paulmillr/qr/decode.js';
+import { Bitmap } from '@paulmillr/qr';
+
+// Scale so it would be 100x100 instead of 25x25
+const opts = { scale: 4 };
+
+// a) Decode using raw bitmap, dependency-free
+function decodeRawBitmap() {
+  const bmBits = writeQR('Hello world', 'raw', opts);
+  const bm = new Bitmap({ width: bmBits[0].length, height: bmBits.length });
+  bm.data = bmBits;
+  const decoded = readQR(bm.toImage());
+  console.log('decoded(pixels)', decoded);
+}
+/*
+Output:
+decoded(pixels) Hello world
+decoded(gif) Hello world
+*/
+
+// b) Decode using external GIF decoder
+import gif from 'omggif'; // npm install omggif@1.0.10
+function parseGIF(image) {
+  const r = new gif.GifReader(image);
+  const data = [];
+  r.decodeAndBlitFrameRGBA(0, data);
+  const { width, height } = r.frameInfo(0);
+  return { width, height, data };
+}
+function decodeWithExternal() {
+  const gifBytes = writeQR('Hello world', 'gif', opts);
+  const decoded = readQR(parseGIF(gifBytes));
+  console.log('decoded(gif)', decoded);
+}
+
+// c) draw gif/svg to browser canvas and read back
+function svgToPng(svgData, width, height) {
+  return new Promise((resolve, reject) => {
+    const domparser = new DOMParser();
+    const doc = domparser.parseFromString(svgData, 'image/svg+xml');
+
+    const svgElement = doc.documentElement;
+    const rect = doc.createElementNS('http://www.w3.org/2000/svg', 'rect');
+
+    rect.setAttribute('width', '100%');
+    rect.setAttribute('height', '100%');
+    rect.setAttribute('fill', 'white');
+    svgElement.insertBefore(rect, svgElement.firstChild);
+
+    const serializer = new XMLSerializer();
+    const source = serializer.serializeToString(doc);
+
+    const img = new Image();
+    img.src = "data:image/svg+xml," + encodeURIComponent(source);
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/png');
+      resolve(dataUrl);
+    };
+    img.onerror = reject;
+  });
+}
+```
+
+### Decoding options
+
+```ts
+export type Point4 = { x: number; y: number }[];
+export type Image = {
+  height: number;
+  width: number;
+  data: Uint8Array | Uint8ClampedArray | number[];
+};
+export type DecodeOpts = {
+  // By default we assume that image has 4 channel per pixel (RGBA). isRGB: true will force to use only one
+  isRGB?: boolean;
+  // Returns 4 center (3 finder pattern + 1 alignment pattern) points if detected
+  detectFn?: (points: Point4) => void;
+  // Returns RGBA image of detected QR code
+  qrFn?: (img: Image) => void;
+};
+export default function decode(img: Image, opts: DecodeOpts = {});
+```
+
+### Decoding algorithm
+
 QR decoding is hard: it is basically computer vision problem. There are two main cases:
 
 - decoding files. Can be slow, because it is supposed to handle complicated cases such as blur / rotation
@@ -110,26 +204,6 @@ The implemented reader algorithm is inspired by [ZXing](https://github.com/zxing
   read information via zig-zag pattern, interleave bytes, correct errors,
   convert to bits and, finally, read segments from bits to create string.
 5. Finished
-
-### Decoding options
-
-```ts
-export type Point4 = { x: number; y: number }[];
-export type Image = {
-  height: number;
-  width: number;
-  data: Uint8Array | Uint8ClampedArray | number[];
-};
-export type DecodeOpts = {
-  // By default we assume that image has 4 channel per pixel (RGBA). isRGB: true will force to use only one
-  isRGB?: boolean;
-  // Returns 4 center (3 finder pattern + 1 alignment pattern) points if detected
-  detectFn?: (points: Point4) => void;
-  // Returns RGBA image of detected QR code
-  qrFn?: (img: Image) => void;
-};
-export default function decode(img: Image, opts: DecodeOpts = {});
-```
 
 ### Vectors
 
