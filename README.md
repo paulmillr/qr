@@ -8,7 +8,9 @@ Minimal browser and node.js QR Code Pattern encoder & decoder.
 - 🔍 Extensive tests ensure correctness: 100MB+ of vectors
 - 🪶 Just 1000 lines for encoding and 800 lines for reading
 
-Interactive demo is available at [paulmillr.com/demos/qr/](https://paulmillr.com/demos/qr/). Other JS libraries are bad, they:
+Interactive demo is available at [paulmillr.com/demos/qr/](https://paulmillr.com/demos/qr/). 
+
+Other JS libraries are bad, they:
 
 - Don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser, [qrcode](https://github.com/nuintun/qrcode) modern refactor of jsQR (138 stars)
 - Too big: [instascan](https://github.com/schmich/instascan) is 1MB+ (zxing compiled to js via emscripten)
