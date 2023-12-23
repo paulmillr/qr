@@ -9,7 +9,6 @@
       "dom"
     ],
     "module": "es6",
-    "moduleResolution": "node16",
     "outDir": ".",
     "noImplicitAny": true,
     "preserveConstEnums": true,
