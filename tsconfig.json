@@ -1,24 +1,17 @@
 {
+  "extends": "@paulmillr/jsbt/tsconfigs/esm.json",
   "compilerOptions": {
-    "strict": true,
-    "declaration": true,
-    "declarationMap": true,
-    "target": "es2020",
-    "lib": [
-      "es2020",
-      "dom"
-    ],
-    "module": "es6",
     "outDir": ".",
-    "noImplicitAny": true,
-    "preserveConstEnums": true,
     "baseUrl": ".",
-    "allowSyntheticDefaultImports": true,
+    "lib": [
+      "dom",
+      "es2020"
+    ],
   },
   "include": [
     "index.ts",
     "decode.ts",
-    "_type_test.ts"
+    "dom.ts"
   ],
   "exclude": [
     "node_modules",

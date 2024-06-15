@@ -32,8 +32,9 @@ const DETECT_MIN_ROW_SKIP = 3;
 
 // TODO: move to index, nearby with bitmap and other graph related stuff?
 const int = (n: number) => n >>> 0;
-type Point4 = [Point, Point, Point, Point];
 
+type Point4 = [Point, Point, Point, Point];
+export type FinderPoints = [Pattern, Pattern, Point, Pattern];
 // distance ^ 2
 const distance2 = (p1: Point, p2: Point) => {
   const x = p1.x - p2.x;
@@ -50,17 +51,24 @@ const pointNeg = (p: Point) => ({ x: -p.x, y: -p.y });
 const pointMirror = (p: Point) => ({ x: p.y, y: p.x });
 const pointClone = (p: Point) => ({ x: p.x, y: p.y });
 const pointInt = (p: Point) => ({ x: int(p.x), y: int(p.y) });
+const pointAdd = (a: Point, b: Point) => ({ x: a.x + b.x, y: a.y + b.y });
 function cap(value: number, min?: number, max?: number) {
   return Math.max(Math.min(value, max || value), min || value);
 }
+const getBytesPerPixel = (img: Image) => {
+  const perPixel = img.data.length / (img.width * img.height);
+  if (perPixel === 3 || perPixel === 4) return perPixel; // RGB or RGBA
+  throw new Error(`Unknown image format, bytes per pixel=${perPixel}`);
+};
 
 /**
  * Convert to grayscale. The function is the most expensive part of decoding:
  * it takes up to 90% of time. TODO: check gamma correction / sqr.
  */
-function toBitmap(img: Image, isRGB = false): Bitmap {
+function toBitmap(img: Image): Bitmap {
+  const bytesPerPixel = getBytesPerPixel(img);
   const brightness = new Uint8Array(img.height * img.width);
-  for (let i = 0, j = 0, d = img.data; i < d.length; i += 4) {
+  for (let i = 0, j = 0, d = img.data; i < d.length; i += bytesPerPixel) {
     const r = d[i];
     const g = d[i + 1];
     const b = d[i + 2];
@@ -194,6 +202,7 @@ function pattern(p: boolean[], size?: number[]) {
         return (out[idx] = patternMerge(f, cur));
       }
       out.push(cur);
+      return;
     },
     toCenter(runs: Runs, end: number) {
       for (let i = p.length - 1; i > res.center; i--) end -= runs[i];
@@ -212,6 +221,7 @@ function pattern(p: boolean[], size?: number[]) {
         if (runs[p] === 0) return true;
         const center = p === res.center;
         if (maxCount && !center && runs[p] > res.size[p] * maxCount) return true;
+        return false;
       };
       for (let p = res.center; p >= 0; p--) if (check(p, neg)) return false;
       i = pointClone(center);
@@ -346,6 +356,7 @@ function findFinder(b: Bitmap) {
         y += d - runs[2] - ySkip;
         return false;
       }
+      return;
     });
   }
   const flen = found.length;
@@ -435,6 +446,7 @@ function findAlignment(b: Bitmap, est: Pattern, allowanceFactor: number) {
       const yy = ALIGNMENT.toCenter(rVert, v);
       res = ALIGNMENT.add(found, xx, yy, total);
       if (res) return false;
+      return;
     });
     if (res) return res;
   }
@@ -547,7 +559,7 @@ function detect(b: Bitmap) {
   const toTL = { x: 3.5, y: 3.5 };
   const toTR = { x: size - 3.5, y: 3.5 };
   const toBL = { x: 3.5, y: size - 3.5 };
-  let br;
+  let br: Point;
   let toBR;
   if (alignmentPattern) {
     br = alignmentPattern;
@@ -556,7 +568,7 @@ function detect(b: Bitmap) {
     br = { x: tr.x - tl.x + bl.x, y: tr.y - tl.y + bl.y };
     toBR = { x: size - 3.5, y: size - 3.5 };
   }
-  const from: Point4 = [tl, tr, br, bl];
+  const from: FinderPoints = [tl, tr, br, bl];
   const bits = transform(b, size, from, [toTL, toTR, toBR, toBL]);
   return { bits, points: from };
 }
@@ -607,7 +619,7 @@ function transform(b: Bitmap, size: number, from: Point4, to: Point4): Bitmap {
     ],
   ];
   const sToQ = squareToQuadrilateral(from);
-  const transform = sToQ.map((i, sy) =>
+  const transform = sToQ.map((i) =>
     i.map((_, qx) => i.reduce((acc, v, j) => acc + v * qToS[j][qx], 0))
   );
 
@@ -708,6 +720,10 @@ function parseInfo(b: Bitmap) {
   return { version, ...format };
 }
 
+// Global symbols in both browsers and Node.js since v11
+// See https://github.com/microsoft/TypeScript/issues/31535
+declare const TextDecoder: any;
+
 function decodeBitmap(b: Bitmap) {
   const size = b.height;
   if (size < 21 || (size & 0b11) !== 1 || size !== b.width)
@@ -791,10 +807,32 @@ function decodeBitmap(b: Bitmap) {
 }
 
 export type DecodeOpts = {
-  isRGB?: boolean;
-  detectFn?: (points: Point4) => void;
-  qrFn?: (img: Image) => void;
+  cropToSquare?: boolean;
+  pointsOnDetect?: (points: FinderPoints) => void;
+  imageOnBitmap?: (img: Image) => void;
+  imageOnDetect?: (img: Image) => void;
+  imageOnResult?: (img: Image) => void;
 };
+
+// Creates square from rectangle
+function cropToSquare(img: Image) {
+  const data = Array.isArray(img.data) ? new Uint8Array(img.data) : img.data;
+  const { height, width } = img;
+  const squareSize = Math.min(height, width);
+  const offset = {
+    x: Math.floor((width - squareSize) / 2),
+    y: Math.floor((height - squareSize) / 2),
+  };
+  const bytesPerPixel = getBytesPerPixel(img);
+  const croppedData = new Uint8Array(squareSize * squareSize * bytesPerPixel);
+  for (let y = 0; y < squareSize; y++) {
+    const srcPos = ((y + offset.y) * width + offset.x) * bytesPerPixel;
+    const dstPos = y * squareSize * bytesPerPixel;
+    const length = squareSize * bytesPerPixel;
+    croppedData.set(data.subarray(srcPos, srcPos + length), dstPos);
+  }
+  return { offset, img: { height: squareSize, width: squareSize, data: croppedData } };
+}
 
 export default function decodeQR(img: Image, opts: DecodeOpts = {}): string {
   for (const field of ['height', 'width'] as const) {
@@ -807,17 +845,25 @@ export default function decodeQR(img: Image, opts: DecodeOpts = {}): string {
     !(img.data instanceof Uint8ClampedArray)
   )
     throw new Error(`Wrong image.data=${img.data} (${typeof img.data})`);
-  if (opts.isRGB !== undefined && typeof opts.isRGB !== 'boolean')
-    throw new Error(`Wrong opts.isRGB=${opts.isRGB}  (${typeof opts.isRGB})`);
-  for (const fn of ['detectFn', 'qrFn'] as const) {
+  if (opts.cropToSquare !== undefined && typeof opts.cropToSquare !== 'boolean')
+    throw new Error(`Wrong opts.cropToSquare=${opts.cropToSquare}`);
+  for (const fn of ['pointsOnDetect', 'imageOnBitmap', 'imageOnDetect', 'imageOnResult'] as const) {
     if (opts[fn] !== undefined && typeof opts[fn] !== 'function')
       throw new Error(`Wrong opts.${fn}=${opts[fn]} (${typeof opts[fn]})`);
   }
-  const bmp = toBitmap(img, opts.isRGB);
+  let offset = { x: 0, y: 0 };
+  if (opts.cropToSquare) ({ img, offset } = cropToSquare(img));
+  const bmp = toBitmap(img);
+  if (opts.imageOnBitmap) opts.imageOnBitmap(bmp.toImage());
   const { bits, points } = detect(bmp);
-  if (opts.detectFn) opts.detectFn(points);
-  if (opts.qrFn) opts.qrFn(bits.toImage());
-  return decodeBitmap(bits);
+  if (opts.pointsOnDetect) {
+    const p = points.map((i) => ({ ...i, ...pointAdd(i, offset) })) as FinderPoints;
+    opts.pointsOnDetect(p);
+  }
+  if (opts.imageOnDetect) opts.imageOnDetect(bits.toImage());
+  const res = decodeBitmap(bits);
+  if (opts.imageOnResult) opts.imageOnResult(bits.toImage());
+  return res;
 }
 
 // Unsafe API utils, exported only for tests

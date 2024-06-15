@@ -128,12 +128,8 @@ Basic bitmap structure for two colors (black & white) small images.
   significant performance impact, but will increase code complexity
 */
 export type Point = { x: number; y: number };
-export type Image = {
-  height: number;
-  width: number;
-  data: Uint8Array | Uint8ClampedArray | number[];
-};
 export type Size = { height: number; width: number };
+export type Image = Size & { data: Uint8Array | Uint8ClampedArray | number[] };
 type DrawValue = boolean | undefined; // undefined=not written, true=foreground, false=background
 // value or fn returning value based on coords
 type DrawFn = DrawValue | ((c: Point, curr: DrawValue) => DrawValue);
@@ -472,8 +468,8 @@ const info = {
 
 const PATTERNS: readonly ((x: number, y: number) => boolean)[] = [
   (x, y) => (x + y) % 2 == 0,
-  (x, y) => y % 2 == 0,
-  (x, y) => x % 3 == 0,
+  (_x, y) => y % 2 == 0,
+  (x, _y) => x % 3 == 0,
   (x, y) => (x + y) % 3 == 0,
   (x, y) => (Math.floor(y / 2) + Math.floor(x / 3)) % 2 == 0,
   (x, y) => ((x * y) % 2) + ((x * y) % 3) == 0,
@@ -750,8 +746,8 @@ function drawTemplate(ver: Version, ecc: ErrorCorrection, maskIdx: Mask, test: b
   }
   // Timing patterns
   b = b
-    .hLine({ x: 0, y: 6 }, Infinity, ({ x, y }, cur) => (cur === undefined ? x % 2 == 0 : cur))
-    .vLine({ x: 6, y: 0 }, Infinity, ({ x, y }, cur) => (cur === undefined ? y % 2 == 0 : cur));
+    .hLine({ x: 0, y: 6 }, Infinity, ({ x }, cur) => (cur === undefined ? x % 2 == 0 : cur))
+    .vLine({ x: 6, y: 0 }, Infinity, ({ y }, cur) => (cur === undefined ? y % 2 == 0 : cur));
   // Format information
   {
     const bits = info.formatBits(ecc, maskIdx);
@@ -816,8 +812,15 @@ function detectType(str: string): EncodingType {
   return type;
 }
 
-function utf8ToBytes(string: string) {
-  return new TextEncoder().encode(string);
+// Global symbols in both browsers and Node.js since v11
+// See https://github.com/microsoft/TypeScript/issues/31535
+declare const TextEncoder: any;
+/**
+ * @example utf8ToBytes('abc') // new Uint8Array([97, 98, 99])
+ */
+export function utf8ToBytes(str: string): Uint8Array {
+  if (typeof str !== 'string') throw new Error(`utf8ToBytes expected string, got ${typeof str}`);
+  return new Uint8Array(new TextEncoder().encode(str)); // https://bugzil.la/1681809
 }
 
 function encode(ver: Version, ecc: ErrorCorrection, data: string, type: EncodingType): Uint8Array {
@@ -939,7 +942,7 @@ function penalty(bm: Bitmap) {
   // Add 10 points to a deviation of 5% increment or decrement in the proportion
   // ratio of dark module from the referential 50%
   let darkPixels = 0;
-  bm.rectRead(0, Infinity, (c, val) => (darkPixels += val ? 1 : 0));
+  bm.rectRead(0, Infinity, (_c, val) => (darkPixels += val ? 1 : 0));
   const darkPercent = (darkPixels / (bm.height * bm.width)) * 100;
   const dark = 10 * Math.floor(Math.abs(darkPercent - 50) / 5);
   return adjacent + box + finder + dark;
