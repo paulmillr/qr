@@ -8,7 +8,7 @@ Minimal browser and node.js QR Code Pattern encoder & decoder.
 - 🔍 Extensive tests ensure correctness: 100MB+ of vectors
 - 🪶 Just 1000 lines for encoding and 800 lines for reading
 
-Interactive demo is available at [paulmillr.com/demos/qr/](https://paulmillr.com/demos/qr/). 
+Interactive demo is available at [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/).
 
 Other JS libraries are bad, they:
 
@@ -217,6 +217,10 @@ Vectors are preserved in a git repo at [github.com/paulmillr/qr-code-vectors](ht
 For testing: accessing camera on iOS Safari requries HTTPS. It means `file:` protocol or non-encrypted `http` can't be used.
 
 The spec is available at [iso.org](https://www.iso.org/standard/62021.html) for 200 CHF.
+
+## DOM
+
+Check out dom.ts for browser-related camera code that would make your apps simpler.
 
 ## Security
 
