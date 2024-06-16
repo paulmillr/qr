@@ -22,13 +22,15 @@ A standalone file [paulmillr-qr.js](https://github.com/paulmillr/qr/releases) is
 > npm install @paulmillr/qr
 
 - [Encoding](#encoding)
-- [Encoding options](#encoding-options)
+  - [Encoding options](#encoding-options)
 - [Decoding](#decoding)
   - [Decoding options](#decoding-options)
   - [Decoding algorithm](#decoding-algorithm)
   - [Test vectors](#test-vectors)
-- [DOM helpers for web apps](#dom-helpers-for-web-apps)
+  - [DOM helpers for web apps](#dom-helpers-for-web-apps)
 - [Using with Kotlin](#using-with-kotlin)
+- [Security](#security)
+- [Speed](#speed)
 
 ## Encoding
 
@@ -215,9 +217,25 @@ For testing: accessing camera on iOS Safari requries HTTPS. It means `file:` pro
 
 The spec is available at [iso.org](https://www.iso.org/standard/62021.html) for 200 CHF.
 
-## DOM helpers for web apps
+### DOM helpers for web apps
 
 Check out dom.ts for browser-related camera code that would make your apps simpler.
+
+## Using with Kotlin
+
+```kotlin
+@JsModule("@paulmillr/qr")
+@JsNonModule
+external object Qr {
+    @JsName("default")
+    fun encodeQR(text: String, output: String = definedExternally, opts: dynamic = definedExternally): Uint8Array
+}
+
+// then
+val bytes = Qr.encodeQR("text", "gif", js("{ scale: 10 }"))
+val blob = Blob(arrayOf(bytes), BlobPropertyBag("image/gif"))
+val imgSrc = URL.createObjectURL(blob)
+```
 
 ## Security
 
@@ -235,22 +253,6 @@ Currently we cross-test against python-qrcode: it is closer to spec than js impl
 We also always use single segment, which is not too optimal, but reduces fingerprinting data.
 
 To improve the behavior, we can cross-test against 3-4 popular libraries.
-
-## Using with Kotlin
-
-```kotlin
-@JsModule("@paulmillr/qr")
-@JsNonModule
-external object Qr {
-    @JsName("default")
-    fun encodeQR(text: String, output: String = definedExternally, opts: dynamic = definedExternally): Uint8Array
-}
-
-// then
-val bytes = Qr.encodeQR("text", "gif", js("{ scale: 10 }"))
-val blob = Blob(arrayOf(bytes), BlobPropertyBag("image/gif"))
-val imgSrc = URL.createObjectURL(blob)
-```
 
 ## Speed
 
