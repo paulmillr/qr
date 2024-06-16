@@ -10,12 +10,14 @@ Minimal browser and node.js QR Code Pattern encoder & decoder.
 
 Interactive demo is available at [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/).
 
-Other JS libraries are bad, they:
+Other JS libraries are bad:
 
-- Don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser, [qrcode](https://github.com/nuintun/qrcode) modern refactor of jsQR (138 stars)
-- Too big: [instascan](https://github.com/schmich/instascan) is 1MB+ (zxing compiled to js via emscripten)
+- These don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser, [qrcode](https://github.com/nuintun/qrcode) modern refactor of jsQR (138 stars)
+- [instascan](https://github.com/schmich/instascan) is too big: over 1MB+ (it's zxing compiled to js via emscripten)
 
 ## Usage
+
+A standalone file [paulmillr-qr.js](https://github.com/paulmillr/qr/releases) is also available.
 
 > npm install @paulmillr/qr
 
@@ -48,23 +50,15 @@ console.log(encodeQR('Hello world', 'ascii'));
 > ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 ```
 
-Kotlin usage:
+- [Encoding options](#encoding-options)
+- [Decoding](#decoding)
+- [Decoding options](#decoding-options)
+- [Decoding algorithm](#decoding-algorithm)
+- [Test vectors](#test-vectors)
+- [DOM helpers for web apps](#dom-helpers-for-web-apps)
+- [Using with Kotlin](#using-with-kotlin)
 
-```kotlin
-@JsModule("@paulmillr/qr")
-@JsNonModule
-external object Qr {
-    @JsName("default")
-    fun encodeQR(text: String, output: String = definedExternally, opts: dynamic = definedExternally): Uint8Array
-}
-
-// then
-val bytes = Qr.encodeQR("text", "gif", js("{ scale: 10 }"))
-val blob = Blob(arrayOf(bytes), BlobPropertyBag("image/gif"))
-val imgSrc = URL.createObjectURL(blob)
-```
-
-### Options
+### Encoding options
 
 ```ts
 type QrOpts = {
@@ -208,7 +202,7 @@ The implemented reader algorithm is inspired by [ZXing](https://github.com/zxing
    convert to bits and, finally, read segments from bits to create string.
 5. Finished
 
-### Vectors
+### Test vectors
 
 To test decoding, we use awesome dataset from [BoofCV](http://boofcv.org/index.php?title=Performance:QrCode).
 BoofCV decodes 73% of test cases, zxing decodes 49%. We are almost at parity with zxing (mostly because of ECI stuff not supported).
@@ -218,7 +212,7 @@ For testing: accessing camera on iOS Safari requries HTTPS. It means `file:` pro
 
 The spec is available at [iso.org](https://www.iso.org/standard/62021.html) for 200 CHF.
 
-## DOM
+## DOM helpers for web apps
 
 Check out dom.ts for browser-related camera code that would make your apps simpler.
 
@@ -238,6 +232,22 @@ Currently we cross-test against python-qrcode: it is closer to spec than js impl
 We also always use single segment, which is not too optimal, but reduces fingerprinting data.
 
 To improve the behavior, we can cross-test against 3-4 popular libraries.
+
+## Using with Kotlin
+
+```kotlin
+@JsModule("@paulmillr/qr")
+@JsNonModule
+external object Qr {
+    @JsName("default")
+    fun encodeQR(text: String, output: String = definedExternally, opts: dynamic = definedExternally): Uint8Array
+}
+
+// then
+val bytes = Qr.encodeQR("text", "gif", js("{ scale: 10 }"))
+val blob = Blob(arrayOf(bytes), BlobPropertyBag("image/gif"))
+val imgSrc = URL.createObjectURL(blob)
+```
 
 ## Speed
 

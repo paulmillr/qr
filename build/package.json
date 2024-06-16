@@ -1,0 +1,14 @@
+{
+  "name": "build",
+  "private": true,
+  "version": "1.0.0",
+  "main": "input.js",
+  "type": "module",
+  "devDependencies": {
+    "@paulmillr/qr": "file:..",
+    "esbuild": "0.20.1"
+  },
+  "scripts": {
+    "build:release": "npx esbuild --bundle input.js --outfile=`npx jsbt outfile` --global-name=`npx jsbt global`"
+  }
+}
