@@ -3,10 +3,10 @@
 Minimal browser and node.js QR Code Pattern encoder & decoder.
 
 - 🔒 Auditable, 0-dependency
-- 🏞️ Encoding supports generating ASCII, term, gif and svg codes
-- 📷 Decoding supports reading from camera feed input, files and non-browser environments
+- 🏞️ Encoding (generating) supports ASCII, term, gif and svg codes
+- 📷 Decoding (reading) supports camera feed input, files and non-browser environments
 - 🔍 Extensive tests ensure correctness: 100MB+ of vectors
-- 🪶 Just 1000 lines for encoding and 800 lines for reading
+- 🪶 Just 1000 lines for encoding and 800 lines for decoding
 
 Interactive demo is available at [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/).
 Check out [qrBTF.com](https://qrbtf.com/en), which uses the library to generate custom, styled codes.
@@ -37,12 +37,41 @@ A standalone file [paulmillr-qr.js](https://github.com/paulmillr/qr/releases) is
 
 ```ts
 import encodeQR from '@paulmillr/qr';
-const gifBytes = encodeQR('Hello world', 'gif');
 
 // import decodeQR from '@paulmillr/qr/decode';
 // See separate README section for decoding.
 
-console.log(encodeQR('Hello world', 'ascii'));
+const txt = 'Hello world';
+// ASCII: not all fonts supported
+const ascii = encodeQR(txt, 'ascii');
+// Terminal: 2x bigger than ascii, all fonts supported
+const terminalFriendly = encodeQR(txt, 'term');
+// Uncompressed GIF
+const gifBytes = encodeQR(txt, 'gif');
+// SVG vector image element
+const svgElement = encodeQR(txt, 'svg');
+// 2D bool array for canvas or other libraries
+const array = encodeQR(txt, 'raw');
+
+// Options
+// Custom error correction level
+// low: 7%, medium: 15% (default), quartile: 25%, high: 30%
+const highErrorCorrection = encodeQR(txt, 'gif', { ecc: 'high' });
+// Custom encoding: 'numeric', 'alphanumeric' or 'byte'
+const customEncoding = encodeQR(txt, 'gif', { encoding: 'byte' });
+// Default scale is 2: each block is 2x2 pixels.
+const larger = encodeQR(txt, 'gif', { scale: 4 });
+// All options
+// type QrOpts = {
+//   ecc?: 'low' | 'medium' | 'quartile' | 'high';
+//   encoding?: 'numeric' | 'alphanumeric' | 'byte' | 'kanji' | 'eci';
+//   version?: number; // 1..40, QR code version
+//   mask?: number; // 0..7, mask number
+//   border?: number; // Border size, default 2.
+//   scale?: number; // Scale to this number. Scale=2 -> each block will be 2x2 pixels
+// };
+
+console.log(ascii);
 > █████████████████████████████████████
 > ██ ▄▄▄▄▄ █  ▀▄▄█ ██▀▄▄▄▄█ ▀█ ▄▄▄▄▄ ██
 > ██ █   █ █▀▄▀▄ ▄▄█▄█ ██▀█▀▀█ █   █ ██
@@ -64,35 +93,12 @@ console.log(encodeQR('Hello world', 'ascii'));
 > ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 ```
 
-### Encoding options
-
-```ts
-type QrOpts = {
-  // Default: 'medium'. Low: 7%, medium: 15%, quartile: 25%, high: 30%
-  ecc?: 'low' | 'medium' | 'quartile' | 'high';
-  // Force specific encoding. Kanji and ECI are not supported yet
-  encoding?: 'numeric' | 'alphanumeric' | 'byte' | 'kanji' | 'eci';
-  version?: number; // 1..40, QR code version
-  mask?: number; // 0..7, mask number
-  border?: number; // Border size, default 2.
-  scale?: number; // Scale to this number. Scale=2 -> each block will be 2x2 pixels
-};
-// - `raw`: 2d boolean array, to use with canvas or other image drawing libraries
-// - `ascii`: ASCII symbols, not all fonts will display it properly
-// - `term`: terminal color escape sequences. 2x bigger than ASCII, but works with all fonts
-// - `gif`: uncompressed gif
-// - `svg`: SVG vector image
-type Output = 'raw' | 'ascii' | 'term' | 'gif' | 'svg';
-function encodeQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
-function encodeQR(text: string, output: 'ascii' | 'term' | 'svg', opts?: QrOpts): string;
-function encodeQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
-```
-
 ## Decoding
 
+GIF reader is not included in the package (it would take a lot of space).
+Decoding raw bitmap is still possible.
+
 ```js
-// gif reader is not included in the package
-// but you can decode raw bitmap
 import encodeQR from '@paulmillr/qr';
 import decodeQR from '@paulmillr/qr/decode.js';
 import { Bitmap } from '@paulmillr/qr';
@@ -129,39 +135,9 @@ function decodeWithExternal() {
   console.log('decoded(gif)', decoded);
 }
 
-// c) draw gif/svg to browser canvas and read back
-
-// Convert SVG to PNG
-function svgToPng(svgData, width, height) {
-  return new Promise((resolve, reject) => {
-    const domparser = new DOMParser();
-    const doc = domparser.parseFromString(svgData, 'image/svg+xml');
-
-    const svgElement = doc.documentElement;
-    const rect = doc.createElementNS('http://www.w3.org/2000/svg', 'rect');
-
-    rect.setAttribute('width', '100%');
-    rect.setAttribute('height', '100%');
-    rect.setAttribute('fill', 'white');
-    svgElement.insertBefore(rect, svgElement.firstChild);
-
-    const serializer = new XMLSerializer();
-    const source = serializer.serializeToString(doc);
-
-    const img = new Image();
-    img.src = 'data:image/svg+xml,' + encodeURIComponent(source);
-    img.onload = function () {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      const dataUrl = canvas.toDataURL('image/png');
-      resolve(dataUrl);
-    };
-    img.onerror = reject;
-  });
-}
+// c) draw gif/svg to browser DOM canvas
+import { svgToPng } from '@paulmillr/qr/dom.js';
+const png = svgToPng(encodeQR('Hello world', 'svg'), 512, 512);
 ```
 
 ### Decoding options
@@ -261,24 +237,24 @@ Benchmarks measured with Apple M2 on MacOS 13 with node.js 19.
 
 ```
 ======== encode/ascii ========
-encode/noble x 1,794 ops/sec @ 557μs/op
+encode/paulmillr-qr x 1,794 ops/sec @ 557μs/op
 encode/qrcode-generator x 3,128 ops/sec @ 319μs/op ± 1.12% (min: 293μs, max: 3ms)
 encode/nuintun x 1,872 ops/sec @ 533μs/op
 ======== encode/gif ========
-encode/noble x 1,771 ops/sec @ 564μs/op
+encode/paulmillr-qr x 1,771 ops/sec @ 564μs/op
 encode/qrcode-generator x 1,773 ops/sec @ 563μs/op
 encode/nuintun x 1,883 ops/sec @ 530μs/op
 ======== encode: big ========
-encode/noble x 87 ops/sec @ 11ms/op
+encode/paulmillr-qr x 87 ops/sec @ 11ms/op
 encode/qrcode-generator x 124 ops/sec @ 8ms/op
 encode/nuintun x 143 ops/sec @ 6ms/op
 ======== decode ========
-decode/noble x 96 ops/sec @ 10ms/op ± 1.39% (min: 9ms, max: 32ms)
+decode/paulmillr-qr x 96 ops/sec @ 10ms/op ± 1.39% (min: 9ms, max: 32ms)
 decode/jsqr x 34 ops/sec @ 28ms/op
 decode/nuintun x 35 ops/sec @ 28ms/op
 decode/instascan x 79 ops/sec @ 12ms/op ± 6.73% (min: 9ms, max: 223ms)
 ======== Decoding quality ========
-blurred(45):  noble=12 (26.66%) jsqr=13 (28.88%) nuintun=13 (28.88%) instascan=11 (24.44%)
+blurred(45):  paulmillr-qr=12 (26.66%) jsqr=13 (28.88%) nuintun=13 (28.88%) instascan=11 (24.44%)
 ```
 
 ## License
