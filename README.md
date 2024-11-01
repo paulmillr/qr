@@ -9,6 +9,7 @@ Minimal browser and node.js QR Code Pattern encoder & decoder.
 - 🪶 Just 1000 lines for encoding and 800 lines for reading
 
 Interactive demo is available at [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/).
+Check out [qrBTF.com](https://qrbtf.com/en), which uses the library to generate custom, styled codes.
 
 Other JS libraries are bad:
 
