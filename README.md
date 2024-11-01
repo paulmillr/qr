@@ -8,12 +8,12 @@ Minimal browser and node.js QR Code Pattern encoder & decoder.
 - 🔍 Extensive tests ensure correctness: 100MB+ of vectors
 - 🪶 Just 1000 lines for encoding and 800 lines for decoding
 
-Interactive demo is available at [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/).
-Check out [qrBTF.com](https://qrbtf.com/en), which uses the library to generate custom, styled codes.
+Check out interactive demo [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/) and
+[qrBTF.com](https://qrbtf.com/en), which uses the library to generate custom, styled codes.
 
 Other JS libraries are bad:
 
-- These don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser, [qrcode](https://github.com/nuintun/qrcode) modern refactor of jsQR (138 stars)
+- [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR and doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) is broken version of jsQR and doesn't work outside of browser, [qrcode](https://github.com/nuintun/qrcode) is fork of jsQR without adoption
 - [instascan](https://github.com/schmich/instascan) is too big: over 1MB+ (it's zxing compiled to js via emscripten)
 
 ## Usage
@@ -42,16 +42,11 @@ import encodeQR from '@paulmillr/qr';
 // See separate README section for decoding.
 
 const txt = 'Hello world';
-// ASCII: not all fonts supported
-const ascii = encodeQR(txt, 'ascii');
-// Terminal: 2x bigger than ascii, all fonts supported
-const terminalFriendly = encodeQR(txt, 'term');
-// Uncompressed GIF
-const gifBytes = encodeQR(txt, 'gif');
-// SVG vector image element
-const svgElement = encodeQR(txt, 'svg');
-// 2D bool array for canvas or other libraries
-const array = encodeQR(txt, 'raw');
+const ascii = encodeQR(txt, 'ascii'); // Not all fonts are supported
+const terminalFriendly = encodeQR(txt, 'term'); // 2x larger, all fonts are OK
+const gifBytes = encodeQR(txt, 'gif'); // Uncompressed GIF
+const svgElement = encodeQR(txt, 'svg'); // SVG vector image element
+const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
 
 // Options
 // Custom error correction level
@@ -162,41 +157,36 @@ export default function decodeQR(img: Image, opts: DecodeOpts = {});
 
 ### Decoding algorithm
 
-QR decoding is hard: it is basically computer vision problem. There are two main cases:
+QR code decoding is challenging; it is essentially a computer vision problem. There are two main scenarios:
 
-- decoding files. Can be slow, because it is supposed to handle complicated cases such as blur / rotation
-- decoding camera feed. Must be fast; even if one frame fails, next frame can succeed
+- Decoding from files: This can be slow because it needs to handle complicated cases such as blur or rotation.
+- Decoding from a camera feed: This must be fast; even if one frame fails, the next frame can succeed.
 
-State-of-the-art is the same as other computer vision problems: neural networks.
-Using them would make the library hard to audit. Since JS can't access accelerators, it would also likely be very slow.
-We don't want to use WebGL, it is complex and exposes users to fingerprinting.
+The state-of-the-art approach for this, as with other computer vision problems, is using neural networks. However, using them would make the library hard to audit. Additionally, since JavaScript can't access hardware accelerators, it would likely be very slow. We also avoid using WebGL because it is complex and exposes users to fingerprinting.
+
 The implemented reader algorithm is inspired by [ZXing](https://github.com/zxing/zxing):
 
-1. `toBitmap`: convert to bitmap, black & white segments. The slowest part and the most important.
-2. `detect`: find 3 finder patterns and one alignment (for version > 1).
-   This is tricky — they can be rotated and distorted by perspective.
-   Square is not really square — it's quadrilateral, and we have no idea about its size.
-   The best thing we can do is counting runs of a same color and
-   selecting one which looks like pattern; same almost same ratio of runs.
-3. `transform`: once patterns have been found, try to fix perspective and transform quadrilateral to square
-4. `decodeBitmap`: after that, execute encoding in reverse:
-   read information via zig-zag pattern, interleave bytes, correct errors,
-   convert to bits and, finally, read segments from bits to create string.
-5. Finished
+1. `toBitmap`: Convert the image to a bitmap of black and white segments. This is the slowest part and the most important.
+2. `detect`: Find three finder patterns and one alignment pattern (for versions > 1). This is tricky—they can be rotated and distorted by perspective. A square might appear as a quadrilateral with unknown size. The best we can do is count runs of the same color and select patterns with almost the same ratio of runs.
+3. `transform`: Once patterns have been found, correct the perspective and transform the quadrilateral into a square.
+4. `decodeBitmap`: Execute the encoding in reverse: read information via a zig-zag pattern, de-interleave bytes, correct errors, convert to bits, and finally, read segments from bits to create the string.
+5. **Finished!**
 
-### Test vectors
+### Decoding test vectors
 
-To test decoding, we use awesome dataset from [BoofCV](http://boofcv.org/index.php?title=Performance:QrCode).
-BoofCV decodes 73% of test cases, zxing decodes 49%. We are almost at parity with zxing (mostly because of ECI stuff not supported).
-Vectors are preserved in a git repo at [github.com/paulmillr/qr-code-vectors](https://github.com/paulmillr/qr-code-vectors).
+To test our QR code decoding, we use an excellent dataset
+from [BoofCV](http://boofcv.org/index.php?title=Performance:QrCode). BoofCV decodes 73% of the test cases,
+while ZXing decodes 49%. Our implementation is nearly at parity with ZXing, primarily because ECI (Extended
+Channel Interpretation) support is not yet included. The test vectors are preserved in a Git repository at
+[github.com/paulmillr/qr-code-vectors](https://github.com/paulmillr/qr-code-vectors).
 
-For testing: accessing camera on iOS Safari requries HTTPS. It means `file:` protocol or non-encrypted `http` can't be used.
+**Note for Testing on iOS Safari:** Accessing the camera on iOS Safari requires HTTPS. This means that the file: protocol or non-encrypted http cannot be used. Ensure your testing environment uses https:.
 
-The spec is available at [iso.org](https://www.iso.org/standard/62021.html) for 200 CHF.
+The QR code specification is available for purchase at [iso.org](https://www.iso.org/standard/62021.html) for 200 CHF.
 
 ### DOM helpers for web apps
 
-Check out dom.ts for browser-related camera code that would make your apps simpler.
+Check out `dom.ts` for browser-related camera code that would make your apps simpler.
 
 ## Using with Kotlin
 
@@ -216,20 +206,26 @@ val imgSrc = URL.createObjectURL(blob)
 
 ## Security
 
-There are multiple ways how single text can be encoded:
+There are multiple ways a single text can be encoded in a QR code, which can lead to potential security implications:
 
-- Differences in segmentation: `abc123` can become `[{type: 'alphanum', 'abc'}, {type: 'num', '123'}]`, `[{type: 'alphanum', 'abc123'}]`
-- Differences between mask selection algo in libraries
-- Defaults: error correction level, how many bits are stored before upgrading versions
+- **Segmentation Differences:** For example, `abc123` can be encoded as:
+  `[{type: 'alphanum', data: 'abc'}, {type: 'num', data: '123'}]` or `[{type: 'alphanum', data: 'abc123'}]`
+- **Mask Selection Algorithms:** Different libraries may use different algorithms for mask selection.
+- **Default Settings:** Variations in error correction levels and how many bits are stored before upgrading versions.
 
-If an adversary is able to access multiple generated QR codes from a specific library, they can
-fingerprint a user, which can be then used to exfiltrate data from air-gapped systems.
-Adversary would then need to create library-specific exploit.
+If an adversary can access multiple QR codes generated from a specific library, they may be able to fingerprint the user. This fingerprinting could be used to exfiltrate data from air-gapped systems. In such cases, the adversary would need to create a library-specific exploit.
 
-Currently we cross-test against python-qrcode: it is closer to spec than js implementations.
-We also always use single segment, which is not too optimal, but reduces fingerprinting data.
+We mitigate these risks by:
 
-To improve the behavior, we can cross-test against 3-4 popular libraries.
+- **Cross-Testing:** We currently cross-test against python-qrcode, which is closer to the specification
+  than some JavaScript implementations.
+- **Single Segment Encoding:** We always use single-segment encoding.
+  While this may not be the most optimal for performance, it reduces the amount of fingerprinting data.
+
+Future plans:
+
+- **Testing Against Multiple Libraries:** To further improve security and reduce fingerprinting, we can
+  cross-test against three to four popular libraries.
 
 ## Speed
 
