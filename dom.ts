@@ -258,7 +258,7 @@ export async function frontalCamera(player: HTMLVideoElement) {
       facingMode: 'environment',
     },
   });
-  console.log('TTT', stream);
+  // console.log('TTT', stream);
   return new QRCamera(stream, player);
 }
 
@@ -281,4 +281,38 @@ export function frameLoop(cb: FrameRequestCallback) {
     cancelAnimationFrame(handle);
     handle = undefined;
   };
+}
+
+export function svgToPng(svgData: string, width: number, height: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!(Number.isSafeInteger(width) && Number.isSafeInteger(height) && width > 0 && height > 0 && width < 8192 && height < 8192))
+      return reject(new Error('invalid width and height: ' + width + ' ' + height));
+    const domparser = new DOMParser();
+    const doc = domparser.parseFromString(svgData, 'image/svg+xml');
+
+    const svgElement = doc.documentElement;
+    const rect = doc.createElementNS('http://www.w3.org/2000/svg', 'rect');
+
+    rect.setAttribute('width', '100%');
+    rect.setAttribute('height', '100%');
+    rect.setAttribute('fill', 'white');
+    svgElement.insertBefore(rect, svgElement.firstChild);
+
+    const serializer = new XMLSerializer();
+    const source = serializer.serializeToString(doc);
+
+    const img = new Image();
+    img.src = 'data:image/svg+xml,' + encodeURIComponent(source);
+    img.onload = function () {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('was not able to create 2d context'));
+      ctx.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/png');
+      resolve(dataUrl);
+    };
+    img.onerror = reject;
+  });
 }
