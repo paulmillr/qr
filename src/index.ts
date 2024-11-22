@@ -17,6 +17,7 @@ limitations under the License.
 
 // Methods for creating QR code patterns
 
+// We do not use newline escape code directly in strings because it's not parser-friendly
 const chCodes = { newline: 10, reset: 27 };
 
 export interface Coder<F, T> {
