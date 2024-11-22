@@ -26,7 +26,7 @@ export interface Coder<F, T> {
 }
 
 function assertNumber(n: number) {
-  if (!Number.isSafeInteger(n)) throw new Error(`Wrong integer: ${n}`);
+  if (!Number.isSafeInteger(n)) throw new Error(`integer expected: ${n}`);
 }
 
 function validateVersion(ver: Version) {
@@ -141,9 +141,9 @@ export class Bitmap {
   private static size(size: Size | number, limit?: Size) {
     if (typeof size === 'number') size = { height: size, width: size };
     if (!Number.isSafeInteger(size.height) && size.height !== Infinity)
-      throw new Error(`Bitmap: wrong height=${size.height} (${typeof size.height})`);
+      throw new Error(`Bitmap: invalid height=${size.height} (${typeof size.height})`);
     if (!Number.isSafeInteger(size.width) && size.width !== Infinity)
-      throw new Error(`Bitmap: wrong width=${size.width} (${typeof size.width})`);
+      throw new Error(`Bitmap: invalid width=${size.width} (${typeof size.width})`);
     if (limit !== undefined) {
       // Clamp length, so it won't overflow, also allows to use Infinity, so we draw until end
       size = {
@@ -198,8 +198,8 @@ export class Bitmap {
   }
   private xy(c: Point | number) {
     if (typeof c === 'number') c = { x: c, y: c };
-    if (!Number.isSafeInteger(c.x)) throw new Error(`Bitmap: wrong x=${c.x}`);
-    if (!Number.isSafeInteger(c.y)) throw new Error(`Bitmap: wrong y=${c.y}`);
+    if (!Number.isSafeInteger(c.x)) throw new Error(`Bitmap: invalid x=${c.x}`);
+    if (!Number.isSafeInteger(c.y)) throw new Error(`Bitmap: invalid y=${c.y}`);
     // Do modulo, so we can use negative positions
     c.x = mod(c.x, this.width);
     c.y = mod(c.y, this.height);
@@ -261,7 +261,7 @@ export class Bitmap {
   // Each pixel size is multiplied by factor
   scale(factor: number) {
     if (!Number.isSafeInteger(factor) || factor > 1024)
-      throw new Error(`Wrong scale factor: ${factor}`);
+      throw new Error(`invalid scale factor: ${factor}`);
     const { height, width } = this;
     const res = new Bitmap({ height: factor * height, width: factor * width });
     return res.rect(
@@ -501,7 +501,7 @@ const GF = {
   })(0x11d),
   exp: (x: number) => GF.tables.exp[x],
   log(x: number) {
-    if (x === 0) throw new Error(`GF.log: wrong arg=${x}`);
+    if (x === 0) throw new Error(`GF.log: invalid arg=${x}`);
     return GF.tables.log[x] % 255;
   },
   mul(x: number, y: number) {
@@ -511,11 +511,11 @@ const GF = {
   add: (x: number, y: number) => x ^ y,
   pow: (x: number, e: number) => GF.tables.exp[(GF.tables.log[x] * e) % 255],
   inv(x: number) {
-    if (x === 0) throw new Error(`GF.inverse: wrong arg=${x}`);
+    if (x === 0) throw new Error(`GF.inverse: invalid arg=${x}`);
     return GF.tables.exp[255 - GF.tables.log[x]];
   },
   polynomial(poly: number[]) {
-    if (poly.length == 0) throw new Error('GF.polymomial: wrong length');
+    if (poly.length == 0) throw new Error('GF.polymomial: invalid length');
     if (poly[0] !== 0) return poly;
     // Strip leading zeros
     let i = 0;
@@ -523,7 +523,7 @@ const GF = {
     return poly.slice(i);
   },
   monomial(degree: number, coefficient: number) {
-    if (degree < 0) throw new Error(`GF.monomial: wrong degree=${degree}`);
+    if (degree < 0) throw new Error(`GF.monomial: invalid degree=${degree}`);
     if (coefficient == 0) return [0];
     let coefficients = fillArr(degree + 1, 0);
     coefficients[0] = coefficient;
@@ -549,7 +549,7 @@ const GF = {
     return GF.polynomial(res);
   },
   mulPolyMonomial(a: number[], degree: number, coefficient: number) {
-    if (degree < 0) throw new Error('GF.mulPolyMonomial: wrong degree');
+    if (degree < 0) throw new Error('GF.mulPolyMonomial: invalid degree');
     if (coefficient == 0) return [0];
     const res = fillArr(a.length + degree, 0);
     for (let i = 0; i < a.length; i++) res[i] = GF.mul(a[i], coefficient);
@@ -657,10 +657,10 @@ function RS(eccWords: number): Coder<Uint8Array, Uint8Array> {
       for (let i = 1; i < 256 && e < locations.length; i++) {
         if (GF.evalPoly(errorLocator, i) === 0) locations[e++] = GF.inv(i);
       }
-      if (e !== locations.length) throw new Error('RS.decode: wrong errors number');
+      if (e !== locations.length) throw new Error('RS.decode: invalid errors number');
       for (let i = 0; i < locations.length; i++) {
         const pos = res.length - 1 - GF.log(locations[i]);
-        if (pos < 0) throw new Error('RS.decode: wrong error location');
+        if (pos < 0) throw new Error('RS.decode: invalid error location');
         const xiInverse = GF.inv(locations[i]);
         let denominator = 1;
         for (let j = 0; j < locations.length; j++) {
@@ -1023,7 +1023,7 @@ export function encodeQR(text: string, output: Output = 'raw', opts: QrOpts = {}
   let res = drawQRBest(ver, ecc, data, opts.mask as Mask);
   res.assertDrawn();
   const border = opts.border === undefined ? 2 : opts.border;
-  if (!Number.isSafeInteger(border)) throw new Error(`Wrong border type=${typeof border}`);
+  if (!Number.isSafeInteger(border)) throw new Error(`invalid border type=${typeof border}`);
   res = res.border(border, false); // Add border
   if (opts.scale !== undefined) res = res.scale(opts.scale); // Scale image
   if (output === 'raw') return res.data;

@@ -172,8 +172,8 @@ type Runs = number[];
  */
 function pattern(p: boolean[], size?: number[]) {
   const _size = size || fillArr(p.length, 1);
-  if (p.length !== _size.length) throw new Error('Wrong pattern');
-  if (!(p.length & 1)) throw new Error('Pattern length should be odd');
+  if (p.length !== _size.length) throw new Error('invalid pattern');
+  if (!(p.length & 1)) throw new Error('invalid pattern, length should be odd');
   const res = {
     center: Math.ceil(p.length / 2) - 1,
     length: p.length,
@@ -526,7 +526,7 @@ function moduleSizeAvg(b: Bitmap, p1: Point, p2: Point) {
 function detect(b: Bitmap) {
   const { bl, tl, tr } = findFinder(b);
   const moduleSize = (moduleSizeAvg(b, tl, tr) + moduleSizeAvg(b, tl, bl)) / 2;
-  if (moduleSize < 1.0) throw new Error(`wrong moduleSize = ${moduleSize}`);
+  if (moduleSize < 1.0) throw new Error(`invalid moduleSize = ${moduleSize}`);
   // Estimate size
   const tltr = int(distance(tl, tr) / moduleSize + 0.5);
   const tlbl = int(distance(tl, bl) / moduleSize + 0.5);
@@ -699,7 +699,7 @@ function parseInfo(b: Bitmap) {
     }
   }
   if (format === undefined && bestFormat.score() <= MAX_BITS_ERROR) format = bestFormat.get();
-  if (format === undefined) throw new Error('wrong format pattern');
+  if (format === undefined) throw new Error('invalid format pattern');
   let version: number | undefined = info.size.decode(size); // Guess version based on bitmap size
   if (version < 7) validateVersion(version);
   else {
@@ -716,8 +716,8 @@ function parseInfo(b: Bitmap) {
       if (version1 !== version2) bestVer.add(popcnt(version2 ^ bits), ver);
     }
     if (version === undefined && bestVer.score() <= MAX_BITS_ERROR) version = bestVer.get();
-    if (version === undefined) throw new Error('Wrong version pattern');
-    if (info.size.encode(version) !== size) throw new Error('Wrong version size');
+    if (version === undefined) throw new Error('invalid version pattern');
+    if (info.size.encode(version) !== size) throw new Error('invalid version size');
   }
   return { version, ...format };
 }
@@ -729,7 +729,7 @@ declare const TextDecoder: any;
 function decodeBitmap(b: Bitmap) {
   const size = b.height;
   if (size < 21 || (size & 0b11) !== 1 || size !== b.width)
-    throw new Error(`decode: wrong size=${size}`);
+    throw new Error(`decode: invalid size=${size}`);
   const { version, mask, ecc } = parseInfo(b);
   const tpl = drawTemplate(version, ecc, mask);
   const { total } = info.capacity(version, ecc);
@@ -839,19 +839,19 @@ function cropToSquare(img: Image) {
 export function decodeQR(img: Image, opts: DecodeOpts = {}): string {
   for (const field of ['height', 'width'] as const) {
     if (!Number.isSafeInteger(img[field]) || img[field] <= 0)
-      throw new Error(`Wrong img.${field}=${img[field]} (${typeof img[field]})`);
+      throw new Error(`invalid img.${field}=${img[field]} (${typeof img[field]})`);
   }
   if (
     !Array.isArray(img.data) &&
     !(img.data instanceof Uint8Array) &&
     !(img.data instanceof Uint8ClampedArray)
   )
-    throw new Error(`Wrong image.data=${img.data} (${typeof img.data})`);
+    throw new Error(`invalid image.data=${img.data} (${typeof img.data})`);
   if (opts.cropToSquare !== undefined && typeof opts.cropToSquare !== 'boolean')
-    throw new Error(`Wrong opts.cropToSquare=${opts.cropToSquare}`);
+    throw new Error(`invalid opts.cropToSquare=${opts.cropToSquare}`);
   for (const fn of ['pointsOnDetect', 'imageOnBitmap', 'imageOnDetect', 'imageOnResult'] as const) {
     if (opts[fn] !== undefined && typeof opts[fn] !== 'function')
-      throw new Error(`Wrong opts.${fn}=${opts[fn]} (${typeof opts[fn]})`);
+      throw new Error(`invalid opts.${fn}=${opts[fn]} (${typeof opts[fn]})`);
   }
   let offset = { x: 0, y: 0 };
   if (opts.cropToSquare) ({ img, offset } = cropToSquare(img));
