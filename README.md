@@ -6,7 +6,7 @@ Minimal browser and node.js QR Code Pattern encoder & decoder.
 - 🏞️ Encoding (generating) supports ASCII, term, gif and svg codes
 - 📷 Decoding (reading) supports camera feed input, files and non-browser environments
 - 🔍 Extensive tests ensure correctness: 100MB+ of vectors
-- 🪶 Just 1000 lines for encoding and 800 lines for decoding
+- 🪶 35KB for encoding + decoding, 18KB for encoding (1000 lines of code)
 
 Check out interactive demo [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/) and
 [qrBTF.com](https://qrbtf.com/en), which uses the library to generate custom, styled codes.
