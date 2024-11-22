@@ -23,11 +23,10 @@ A standalone file [paulmillr-qr.js](https://github.com/paulmillr/qr/releases) is
 > npm install @paulmillr/qr
 
 - [Encoding](#encoding)
-  - [Encoding options](#encoding-options)
 - [Decoding](#decoding)
   - [Decoding options](#decoding-options)
   - [Decoding algorithm](#decoding-algorithm)
-  - [Test vectors](#test-vectors)
+  - [Decoding test vectors](#decoding-test-vectors)
   - [DOM helpers for web apps](#dom-helpers-for-web-apps)
 - [Using with Kotlin](#using-with-kotlin)
 - [Security](#security)

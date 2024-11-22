@@ -17,6 +17,8 @@ limitations under the License.
 
 // Methods for creating QR code patterns
 
+const chCodes = { newline: 10, reset: 27 };
+
 export interface Coder<F, T> {
   encode(from: F): T;
   decode(to: T): F;
@@ -153,7 +155,7 @@ export class Bitmap {
   static fromString(s: string): Bitmap {
     // Remove linebreaks on start and end, so we draw in `` section
     s = s.replace(/^\n+/g, '').replace(/\n+$/g, '');
-    const lines = s.split('\n');
+    const lines = s.split(String.fromCharCode(chCodes.newline));
     const height = lines.length;
     const data = new Array(height);
     let width: number | undefined;
@@ -281,7 +283,7 @@ export class Bitmap {
   toString() {
     return this.data
       .map((i) => i.map((j) => (j === undefined ? '?' : j ? 'X' : ' ')).join(''))
-      .join('\n');
+      .join(String.fromCharCode(chCodes.newline));
   }
   toASCII(): string {
     const { height, width, data } = this;
@@ -292,20 +294,26 @@ export class Bitmap {
       for (let x = 0; x < width; x++) {
         const first = data[y][x];
         const second = y + 1 >= height ? true : data[y + 1][x]; // if last row outside bitmap, make it black
-        if (!first && !second) out += '█'; // both rows white (empty)
-        else if (!first && second) out += '▀'; // top row white
-        else if (first && !second) out += '▄'; // down row white
+        if (!first && !second)
+          out += '█'; // both rows white (empty)
+        else if (!first && second)
+          out += '▀'; // top row white
+        else if (first && !second)
+          out += '▄'; // down row white
         else if (first && second) out += ' '; // both rows black
       }
-      out += '\n';
+      out += String.fromCharCode(chCodes.newline);
     }
     return out;
   }
   toTerm(): string {
-    const reset = '\x1b[0m';
-    const whiteBG = `\x1b[1;47m  ${reset}`;
-    const darkBG = `\x1b[40m  ${reset}`;
-    return this.data.map((i) => i.map((j) => (j ? darkBG : whiteBG)).join('')).join('\n');
+    const cc = String.fromCharCode(chCodes.reset);
+    const reset = cc + '[0m';
+    const whiteBG = cc + '[1;47m  ' + reset;
+    const darkBG = cc + `[40m  ` + reset;
+    return this.data
+      .map((i) => i.map((j) => (j ? darkBG : whiteBG)).join(''))
+      .join(String.fromCharCode(chCodes.newline));
   }
   toSVG(): string {
     let out = `<svg xmlns:svg="http://www.w3.org/2000/svg" viewBox="0 0 ${this.width} ${this.height}" version="1.1" xmlns="http://www.w3.org/2000/svg">`;
@@ -982,14 +990,10 @@ function validateMask(mask: Mask) {
     throw new Error(`Invalid mask=${mask}. Expected number [0..7]`);
 }
 type Output = 'raw' | 'ascii' | 'term' | 'gif' | 'svg';
-export default function encodeQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
-export default function encodeQR(
-  text: string,
-  output: 'ascii' | 'term' | 'svg',
-  opts?: QrOpts
-): string;
-export default function encodeQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
-export default function encodeQR(text: string, output: Output = 'raw', opts: QrOpts = {}) {
+export function encodeQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
+export function encodeQR(text: string, output: 'ascii' | 'term' | 'svg', opts?: QrOpts): string;
+export function encodeQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
+export function encodeQR(text: string, output: Output = 'raw', opts: QrOpts = {}) {
   const ecc = opts.ecc !== undefined ? opts.ecc : 'medium';
   validateECC(ecc);
   const encoding = opts.encoding !== undefined ? opts.encoding : detectType(text);
@@ -1028,6 +1032,8 @@ export default function encodeQR(text: string, output: Output = 'raw', opts: QrO
   else if (output === 'term') return res.toTerm();
   else throw new Error(`Unknown output: ${output}`);
 }
+
+export default encodeQR;
 
 export const utils = {
   best,

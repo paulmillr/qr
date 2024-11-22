@@ -3,6 +3,7 @@
   "version": "0.2.1",
   "description": "Minimal browser & node.js QR Code Pattern reader and generator. Supports ascii, term, gif and svg formats",
   "files": [
+    "esm",
     "index.js",
     "index.d.ts",
     "index.d.ts.map",
@@ -18,7 +19,6 @@
     "LICENSE",
     "LICENSE-MIT"
   ],
-  "type": "module",
   "main": "index.js",
   "module": "index.js",
   "types": "index.d.ts",
@@ -40,10 +40,24 @@
     "url": "git+https://github.com/paulmillr/qr.git"
   },
   "scripts": {
-    "build": "tsc",
-    "lint": "prettier --check index.ts dom.ts decode.ts",
-    "format": "prettier --write index.ts dom.ts decode.ts",
+    "build": "tsc && tsc -p tsconfig.esm.json",
+    "lint": "prettier --check src",
+    "format": "prettier --write src",
     "test": "node test/index.test.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./esm/index.js",
+      "require": "./index.js"
+    },
+    "./decode.js": {
+      "import": "./esm/decode.js",
+      "require": "./decode.js"
+    },
+    "./dom.js": {
+      "import": "./esm/dom.js",
+      "require": "./dom.js"
+    }
   },
   "keywords": [
     "qr",

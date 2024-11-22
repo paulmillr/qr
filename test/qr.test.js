@@ -2,7 +2,7 @@ import { deepStrictEqual } from 'assert';
 import { readFileSync } from 'fs';
 import { gunzipSync } from 'zlib';
 import { should } from 'micro-should';
-import encodeQR, { _tests } from '../index.js';
+import encodeQR, { _tests } from '../esm/index.js';
 const jsonGZ = (path) => JSON.parse(gunzipSync(readFileSync(path)));
 const TEST_CASES = jsonGZ('./test/vectors/small-vectors.json.gz');
 

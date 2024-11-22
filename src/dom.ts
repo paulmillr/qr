@@ -258,7 +258,6 @@ export async function frontalCamera(player: HTMLVideoElement) {
       facingMode: 'environment',
     },
   });
-  // console.log('TTT', stream);
   return new QRCamera(stream, player);
 }
 
@@ -285,7 +284,16 @@ export function frameLoop(cb: FrameRequestCallback) {
 
 export function svgToPng(svgData: string, width: number, height: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    if (!(Number.isSafeInteger(width) && Number.isSafeInteger(height) && width > 0 && height > 0 && width < 8192 && height < 8192))
+    if (
+      !(
+        Number.isSafeInteger(width) &&
+        Number.isSafeInteger(height) &&
+        width > 0 &&
+        height > 0 &&
+        width < 8192 &&
+        height < 8192
+      )
+    )
       return reject(new Error('invalid width and height: ' + width + ' ' + height));
     const domparser = new DOMParser();
     const doc = domparser.parseFromString(svgData, 'image/svg+xml');

@@ -1,6 +1,6 @@
 import { deepStrictEqual } from 'assert';
 import { should, describe } from 'micro-should';
-import { _tests } from '../index.js';
+import { _tests } from '../esm/index.js';
 
 const ALIGNMENT_PATTERN_POSITIONS = [
   [], // Version 1

@@ -1,7 +1,7 @@
 import { deepStrictEqual } from 'assert';
 import { should } from 'micro-should';
 import { GifReader } from 'omggif';
-import encodeQR, { _tests } from '../index.js';
+import encodeQR, { _tests } from '../esm/index.js';
 const { Bitmap } = _tests;
 
 const strip = (str) => str.replace(/^\n+/g, '').replace(/\n+$/g, '');

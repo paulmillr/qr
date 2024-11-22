@@ -2,7 +2,7 @@ import { deepStrictEqual } from 'assert';
 import { should } from 'micro-should';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { decode as jpegDecode } from 'jpeg-js';
-import readQR, { _tests } from '../decode.js';
+import readQR, { _tests } from '../esm/decode.js';
 
 const DIR = './test/vectors/boofcv-v3/';
 

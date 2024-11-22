@@ -2,8 +2,8 @@ import { deepStrictEqual } from 'assert';
 import { run, mark } from 'micro-bmark';
 import * as jpeg from 'jpeg-js';
 import * as fs from 'fs';
-import encodeQR from '../index.js';
-import decodeQR from '../decode.js';
+import encodeQR from '../esm/index.js';
+import decodeQR from '../esm/decode.js';
 // Other libraries
 import * as qrcodeGenerator from 'qrcode-generator';
 import jsqr from 'jsqr';

@@ -532,8 +532,10 @@ function detect(b: Bitmap) {
   const tlbl = int(distance(tl, bl) / moduleSize + 0.5);
   let size = int((tltr + tlbl) / 2 + 7);
   const rem = size % 4;
-  if (rem === 0) size++; // -> 1
-  else if (rem === 2) size--; // -> 1
+  if (rem === 0)
+    size++; // -> 1
+  else if (rem === 2)
+    size--; // -> 1
   else if (rem === 3) size -= 2;
   const version = info.size.decode(size);
   validateVersion(version);
@@ -834,7 +836,7 @@ function cropToSquare(img: Image) {
   return { offset, img: { height: squareSize, width: squareSize, data: croppedData } };
 }
 
-export default function decodeQR(img: Image, opts: DecodeOpts = {}): string {
+export function decodeQR(img: Image, opts: DecodeOpts = {}): string {
   for (const field of ['height', 'width'] as const) {
     if (!Number.isSafeInteger(img[field]) || img[field] <= 0)
       throw new Error(`Wrong img.${field}=${img[field]} (${typeof img[field]})`);
@@ -865,6 +867,8 @@ export default function decodeQR(img: Image, opts: DecodeOpts = {}): string {
   if (opts.imageOnResult) opts.imageOnResult(bits.toImage());
   return res;
 }
+
+export default decodeQR;
 
 // Unsafe API utils, exported only for tests
 export const _tests = {
