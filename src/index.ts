@@ -29,12 +29,12 @@ function assertNumber(n: number) {
   if (!Number.isSafeInteger(n)) throw new Error(`integer expected: ${n}`);
 }
 
-function validateVersion(ver: Version) {
+function validateVersion(ver: Version): void {
   if (!Number.isSafeInteger(ver) || ver < 1 || ver > 40)
     throw new Error(`Invalid version=${ver}. Expected number [1..40]`);
 }
 
-function bin(dec: number, pad: number) {
+function bin(dec: number, pad: number): string {
   return dec.toString(2).padStart(pad, '0');
 }
 
@@ -75,13 +75,13 @@ function best<T>() {
   let best: T | undefined;
   let bestScore = Infinity;
   return {
-    add(score: number, value: T) {
+    add(score: number, value: T): void {
       if (score >= bestScore) return;
       best = value;
       bestScore = score;
     },
-    get: () => best,
-    score: () => bestScore,
+    get: (): T | undefined => best,
+    score: (): number => bestScore,
   };
 }
 
@@ -185,13 +185,16 @@ export class Bitmap {
     this.height = height;
     this.width = width;
   }
-  point(p: Point) {
+  point(p: Point): DrawValue {
     return this.data[p.y][p.x];
   }
-  isInside(p: Point) {
+  isInside(p: Point): boolean {
     return 0 <= p.x && p.x < this.width && 0 <= p.y && p.y < this.height;
   }
-  size(offset?: Point | number) {
+  size(offset?: Point | number): {
+    height: number;
+    width: number;
+  } {
     if (!offset) return { height: this.height, width: this.width };
     const { x, y } = this.xy(offset);
     return { height: this.height - y, width: this.width - x };
@@ -206,7 +209,7 @@ export class Bitmap {
     return c;
   }
   // Basically every operation can be represented as rect
-  rect(c: Point | number, size: Size | number, value: DrawFn) {
+  rect(c: Point | number, size: Size | number, value: DrawFn): this {
     const { x, y } = this.xy(c);
     const { height, width } = Bitmap.size(size, this.size({ x, y }));
     for (let yPos = 0; yPos < height; yPos++) {
@@ -221,21 +224,21 @@ export class Bitmap {
     return this;
   }
   // returns rectangular part of bitmap
-  rectRead(c: Point | number, size: Size | number, fn: ReadFn) {
+  rectRead(c: Point | number, size: Size | number, fn: ReadFn): this {
     return this.rect(c, size, (c, cur) => {
       fn(c, cur);
       return cur;
     });
   }
   // Horizontal & vertical lines
-  hLine(c: Point | number, len: number, value: DrawFn) {
+  hLine(c: Point | number, len: number, value: DrawFn): this {
     return this.rect(c, { width: len, height: 1 }, value);
   }
-  vLine(c: Point | number, len: number, value: DrawFn) {
+  vLine(c: Point | number, len: number, value: DrawFn): this {
     return this.rect(c, { width: 1, height: len }, value);
   }
   // add border
-  border(border = 2, value: DrawValue) {
+  border(border = 2, value: DrawValue): Bitmap {
     const height = this.height + 2 * border;
     const width = this.width + 2 * border;
     const v = fillArr(border, value);
@@ -243,23 +246,23 @@ export class Bitmap {
     return new Bitmap({ height, width }, [...h, ...this.data.map((i) => [...v, ...i, ...v]), ...h]);
   }
   // Embed another bitmap on coordinates
-  embed(c: Point | number, bm: Bitmap) {
+  embed(c: Point | number, bm: Bitmap): this {
     return this.rect(c, bm.size(), ({ x, y }) => bm.data[y][x]);
   }
   // returns rectangular part of bitmap
-  rectSlice(c: Point | number, size: Size | number = this.size()) {
+  rectSlice(c: Point | number, size: Size | number = this.size()): Bitmap {
     const rect = new Bitmap(Bitmap.size(size, this.size(this.xy(c))));
     this.rect(c, size, ({ x, y }, cur) => (rect.data[y][x] = cur));
     return rect;
   }
   // Change shape, replace rows with columns (data[y][x] -> data[x][y])
-  inverse() {
+  inverse(): Bitmap {
     const { height, width } = this;
     const res = new Bitmap({ height: width, width: height });
     return res.rect({ x: 0, y: 0 }, Infinity, ({ x, y }) => this.data[x][y]);
   }
   // Each pixel size is multiplied by factor
-  scale(factor: number) {
+  scale(factor: number): Bitmap {
     if (!Number.isSafeInteger(factor) || factor > 1024)
       throw new Error(`invalid scale factor: ${factor}`);
     const { height, width } = this;
@@ -270,18 +273,18 @@ export class Bitmap {
       ({ x, y }) => this.data[Math.floor(y / factor)][Math.floor(x / factor)]
     );
   }
-  clone() {
+  clone(): Bitmap {
     const res = new Bitmap(this.size());
     return res.rect({ x: 0, y: 0 }, this.size(), ({ x, y }) => this.data[y][x]);
   }
   // Ensure that there is no undefined values left
-  assertDrawn() {
+  assertDrawn(): void {
     this.rectRead(0, Infinity, (_, cur) => {
       if (typeof cur !== 'boolean') throw new Error(`Invalid color type=${typeof cur}`);
     });
   }
   // Simple string representation for debugging
-  toString() {
+  toString(): string {
     return this.data
       .map((i) => i.map((j) => (j === undefined ? '?' : j ? 'X' : ' ')).join(''))
       .join(String.fromCharCode(chCodes.newline));
@@ -733,7 +736,12 @@ function interleave(ver: Version, ecc: ErrorCorrection): Coder<Uint8Array, Uint8
 
 // Draw
 // Generic template per version+ecc+mask. Can be cached, to speedup calculations.
-function drawTemplate(ver: Version, ecc: ErrorCorrection, maskIdx: Mask, test: boolean = false) {
+function drawTemplate(
+  ver: Version,
+  ecc: ErrorCorrection,
+  maskIdx: Mask,
+  test: boolean = false
+): Bitmap {
   const size = info.size.encode(ver);
   let b = new Bitmap(size + 2);
   // Finder patterns
@@ -788,7 +796,11 @@ function drawTemplate(ver: Version, ecc: ErrorCorrection, maskIdx: Mask, test: b
   return b;
 }
 // zigzag: bottom->top && top->bottom
-function zigzag(tpl: Bitmap, maskIdx: Mask, fn: (x: number, y: number, mask: boolean) => void) {
+function zigzag(
+  tpl: Bitmap,
+  maskIdx: Mask,
+  fn: (x: number, y: number, mask: boolean) => void
+): void {
   const size = tpl.height;
   const pattern = PATTERNS[maskIdx];
   // zig-zag pattern
@@ -882,7 +894,7 @@ function drawQR(
   data: Uint8Array,
   maskIdx: Mask,
   test: boolean = false
-) {
+): Bitmap {
   const b = drawTemplate(ver, ecc, maskIdx, test);
   let i = 0;
   const need = 8 * data.length;
@@ -898,7 +910,7 @@ function drawQR(
   return b;
 }
 
-function penalty(bm: Bitmap) {
+function penalty(bm: Bitmap): number {
   const inverse = bm.inverse();
   // Adjacent modules in row/column in same | No. of modules = (5 + i) color
   const sameColor = (row: DrawValue[]) => {
@@ -1036,7 +1048,52 @@ export function encodeQR(text: string, output: Output = 'raw', opts: QrOpts = {}
 
 export default encodeQR;
 
-export const utils = {
+export const utils: {
+  best: typeof best;
+  bin: typeof bin;
+  drawTemplate: typeof drawTemplate;
+  fillArr: typeof fillArr;
+  info: {
+    size: Coder<Version, number>;
+    sizeType: (ver: Version) => number;
+    // Based on https://codereview.stackexchange.com/questions/74925/algorithm-to-generate-this-alignment-pattern-locations-table-for-qr-codes
+    alignmentPatterns(ver: Version): number[];
+    ECCode: Record<ErrorCorrection, number>;
+    formatMask: number;
+    formatBits(ecc: ErrorCorrection, maskIdx: Mask): number;
+    versionBits(ver: Version): number;
+    alphabet: {
+      numeric: Coder<number[], string[]> & {
+        has: (char: string) => boolean;
+      };
+      alphanumerc: Coder<number[], string[]> & {
+        has: (char: string) => boolean;
+      };
+    };
+    lengthBits(ver: Version, type: EncodingType): number;
+    modeBits: {
+      numeric: string;
+      alphanumeric: string;
+      byte: string;
+      kanji: string;
+      eci: string;
+    };
+    capacity(
+      ver: Version,
+      ecc: ErrorCorrection
+    ): {
+      words: number;
+      numBlocks: number;
+      shortBlocks: number;
+      blockLen: number;
+      capacity: number;
+      total: number;
+    };
+  };
+  interleave: typeof interleave;
+  validateVersion: typeof validateVersion;
+  zigzag: typeof zigzag;
+} = {
   best,
   bin,
   drawTemplate,
@@ -1048,7 +1105,51 @@ export const utils = {
 };
 
 // Unsafe API utils, exported only for tests
-export const _tests = {
+export const _tests: {
+  Bitmap: typeof Bitmap;
+  info: {
+    size: Coder<Version, number>;
+    sizeType: (ver: Version) => number;
+    // Based on https://codereview.stackexchange.com/questions/74925/algorithm-to-generate-this-alignment-pattern-locations-table-for-qr-codes
+    alignmentPatterns(ver: Version): number[];
+    ECCode: Record<ErrorCorrection, number>;
+    formatMask: number;
+    formatBits(ecc: ErrorCorrection, maskIdx: Mask): number;
+    versionBits(ver: Version): number;
+    alphabet: {
+      numeric: Coder<number[], string[]> & {
+        has: (char: string) => boolean;
+      };
+      alphanumerc: Coder<number[], string[]> & {
+        has: (char: string) => boolean;
+      };
+    };
+    lengthBits(ver: Version, type: EncodingType): number;
+    modeBits: {
+      numeric: string;
+      alphanumeric: string;
+      byte: string;
+      kanji: string;
+      eci: string;
+    };
+    capacity(
+      ver: Version,
+      ecc: ErrorCorrection
+    ): {
+      words: number;
+      numBlocks: number;
+      shortBlocks: number;
+      blockLen: number;
+      capacity: number;
+      total: number;
+    };
+  };
+  detectType: typeof detectType;
+  encode: typeof encode;
+  drawQR: typeof drawQR;
+  penalty: typeof penalty;
+  PATTERNS: readonly ((x: number, y: number) => boolean)[];
+} = {
   Bitmap,
   info,
   detectType,

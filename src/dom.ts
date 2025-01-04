@@ -15,10 +15,17 @@ It is complicated and very easy to make subtle errors which will break decoding 
 import decodeQR, { DecodeOpts, FinderPoints } from './decode.js';
 import type { Image } from './index.js';
 
-export const getSize = (elm: HTMLElement) => ({
-  width: Math.floor(+getComputedStyle(elm).width.split('px')[0]),
-  height: Math.floor(+getComputedStyle(elm).height.split('px')[0]),
-});
+export const getSize = (
+  elm: HTMLElement
+): {
+  width: number;
+  height: number;
+} => {
+  const css = getComputedStyle(elm);
+  const width = Math.floor(+css.width.split('px')[0]);
+  const height = Math.floor(+css.height.split('px')[0]);
+  return { width, height };
+};
 
 const setCanvasSize = (canvas: HTMLCanvasElement, height: number, width: number) => {
   // NOTE: setting canvas.width even to same size will clear & redraw it (flickering)
@@ -159,7 +166,7 @@ export class QRCanvas {
       }
     }
   }
-  drawImage(image: CanvasImageSource, height: number, width: number) {
+  drawImage(image: CanvasImageSource, height: number, width: number): string | undefined {
     this.setSize(height, width);
     const { context } = this.main;
     context.drawImage(image, 0, 0, width, height);
@@ -178,7 +185,7 @@ export class QRCanvas {
     }
     return;
   }
-  clear() {
+  clear(): void {
     clearCanvas(this.main);
     if (this.overlay) clearCanvas(this.overlay);
     if (this.bitmap) clearCanvas(this.bitmap);
@@ -205,7 +212,12 @@ class QRCamera {
    * Returns list of cameras
    * NOTE: available only after first getUserMedia request, so cannot be additional method
    */
-  async listDevices() {
+  async listDevices(): Promise<
+    {
+      deviceId: string;
+      label: string;
+    }[]
+  > {
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices)
       throw new Error('Media Devices not supported');
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -220,20 +232,20 @@ class QRCamera {
    * Change stream to different camera
    * @param deviceId - devideId from '.listDevices'
    */
-  async setDevice(deviceId: string) {
+  async setDevice(deviceId: string): Promise<void> {
     this.stop();
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { deviceId: { exact: deviceId } },
     });
     this.setStream(stream);
   }
-  readFrame(canvas: QRCanvas, fullSize = false) {
+  readFrame(canvas: QRCanvas, fullSize = false): string | undefined {
     const { player } = this;
     if (fullSize) return canvas.drawImage(player, player.videoHeight, player.videoWidth);
     const size = getSize(player);
     return canvas.drawImage(player, size.height, size.width);
   }
-  stop() {
+  stop(): void {
     for (const track of this.stream.getTracks()) track.stop();
   }
 }
@@ -247,7 +259,7 @@ class QRCamera {
  * await camera.setDevice(devices[0].deviceId); // Change camera
  * const res = camera.readFrame(canvas);
  */
-export async function frontalCamera(player: HTMLVideoElement) {
+export async function frontalCamera(player: HTMLVideoElement): Promise<QRCamera> {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
       // Ask for screen resolution
@@ -275,7 +287,7 @@ export function frameLoop(cb: FrameRequestCallback) {
     handle = requestAnimationFrame(loop);
   }
   handle = requestAnimationFrame(loop);
-  return () => {
+  return (): void => {
     if (handle === undefined) return;
     cancelAnimationFrame(handle);
     handle = undefined;

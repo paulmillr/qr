@@ -281,7 +281,11 @@ const FINDER = pattern([true, false, true, false, true], [1, 1, 3, 1, 1]);
 // dark/light/dark in 1:1:1 ratio
 const ALIGNMENT = pattern([false, true, false]);
 
-function findFinder(b: Bitmap) {
+function findFinder(b: Bitmap): {
+  bl: Pattern;
+  tl: Pattern;
+  tr: Pattern;
+} {
   let found: Pattern[] = [];
   function checkRuns(runs: Runs, v = 2) {
     const total = sum(runs);
@@ -523,7 +527,10 @@ function moduleSizeAvg(b: Bitmap, p1: Point, p2: Point) {
   return (est1 + est2) / (2 * FINDER.totalSize);
 }
 
-function detect(b: Bitmap) {
+function detect(b: Bitmap): {
+  bits: Bitmap;
+  points: FinderPoints;
+} {
   const { bl, tl, tr } = findFinder(b);
   const moduleSize = (moduleSizeAvg(b, tl, tr) + moduleSizeAvg(b, tl, bl)) / 2;
   if (moduleSize < 1.0) throw new Error(`invalid moduleSize = ${moduleSize}`);
@@ -572,7 +579,7 @@ function detect(b: Bitmap) {
   }
   const from: FinderPoints = [tl, tr, br, bl];
   const bits = transform(b, size, from, [toTL, toTR, toBR, toBL]);
-  return { bits, points: from };
+  return { bits: bits, points: from };
 }
 
 // Perspective transform by 4 points
@@ -726,7 +733,7 @@ function parseInfo(b: Bitmap) {
 // See https://github.com/microsoft/TypeScript/issues/31535
 declare const TextDecoder: any;
 
-function decodeBitmap(b: Bitmap) {
+function decodeBitmap(b: Bitmap): string {
   const size = b.height;
   if (size < 21 || (size & 0b11) !== 1 || size !== b.width)
     throw new Error(`decode: invalid size=${size}`);
@@ -871,7 +878,12 @@ export function decodeQR(img: Image, opts: DecodeOpts = {}): string {
 export default decodeQR;
 
 // Unsafe API utils, exported only for tests
-export const _tests = {
+export const _tests: {
+  toBitmap: typeof toBitmap;
+  decodeBitmap: typeof decodeBitmap;
+  findFinder: typeof findFinder;
+  detect: typeof detect;
+} = {
   toBitmap,
   decodeBitmap,
   findFinder,
