@@ -1,6 +1,6 @@
 /*!
 Copyright (c) 2023 Paul Miller (paulmillr.com)
-The library @paulmillr/qr is dual-licensed under the Apache 2.0 OR MIT license.
+The library paulmillr-qr is dual-licensed under the Apache 2.0 OR MIT license.
 You can select a license of your choice.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,12 +14,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+/**
+ * Methods for decoding (reading) QR code patterns.
+ * @module
+ */
 
 import type { EncodingType, ErrorCorrection, Image, Point, Mask } from './index.js';
 import { Bitmap, utils } from './index.js';
 const { best, bin, drawTemplate, fillArr, info, interleave, validateVersion, zigzag } = utils;
-
-// Methods for reading QR code patterns
 
 // Constants
 const MAX_BITS_ERROR = 3; // Up to 3 bit errors in version/format

@@ -1,16 +1,27 @@
-/*
-Optional DOM related utilities.
+/*!
+Copyright (c) 2023 Paul Miller (paulmillr.com)
+The library paulmillr-qr is dual-licensed under the Apache 2.0 OR MIT license.
+You can select a license of your choice.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-The code is not perfect, but it's useful to decode QR from camera.
+    http://www.apache.org/licenses/LICENSE-2.0
 
-Features:
-
-- draw overlay: helps user to position QR code on camera
-- draw bitmap: useful for debugging (what decoder sees)
-- draw result: show scanned QR code
-
-It is complicated and very easy to make subtle errors which will break decoding in some cases.
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
+/**
+ * Optional DOM related utilities. Some utilities, useful to decode QR from camera:
+ * - draw overlay: helps user to position QR code on camera
+ * - draw bitmap: useful for debugging (what decoder sees)
+ * - draw result: show scanned QR code
+ * The code is fragile: it is easy to make subtle errors, which will break decoding.
+ * @module
+ */
 
 import decodeQR, { DecodeOpts, FinderPoints } from './decode.js';
 import type { Image } from './index.js';
@@ -280,7 +291,7 @@ export async function frontalCamera(player: HTMLVideoElement): Promise<QRCamera>
  * const cancel = frameLoop((ns) => console.log(ns));
  * cancel();
  */
-export function frameLoop(cb: FrameRequestCallback) {
+export function frameLoop(cb: FrameRequestCallback): () => void {
   let handle: number | undefined = undefined;
   function loop(ts: number) {
     cb(ts);

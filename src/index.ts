@@ -1,6 +1,6 @@
 /*!
 Copyright (c) 2023 Paul Miller (paulmillr.com)
-The library @paulmillr/qr is dual-licensed under the Apache 2.0 OR MIT license.
+The library paulmillr-qr is dual-licensed under the Apache 2.0 OR MIT license.
 You can select a license of your choice.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,7 +15,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Methods for creating QR code patterns
+/**
+ * Methods for encoding (generating) QR code patterns.
+ * Check out decode.ts for decoding (reading).
+ * @module
+ */
 
 // We do not use newline escape code directly in strings because it's not parser-friendly
 const chCodes = { newline: 10, reset: 27 };
@@ -71,7 +75,11 @@ function includesAt<T>(lst: T[], pattern: T[], index: number): boolean {
   return true;
 }
 // Optimize for minimal score/penalty
-function best<T>() {
+function best<T>(): {
+  add(score: number, value: T): void;
+  get: () => T | undefined;
+  score: () => number;
+} {
   let best: T | undefined;
   let bestScore = Infinity;
   return {
