@@ -27,7 +27,7 @@
     "@paulmillr/jsbt": "0.2.1",
     "jpeg-js": "0.4.4",
     "micro-bmark": "0.3.1",
-    "micro-should": "0.4.0",
+    "micro-should": "0.5.0",
     "omggif": "1.0.10",
     "prettier": "3.3.2",
     "typescript": "5.5.2"

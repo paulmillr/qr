@@ -161,7 +161,7 @@ X     X
 XXXXXXX`,
     'basic finder'
   );
-  console.log(b.toASCII());
+  // console.log(b.toASCII());
   const ascii = strip(`
  ▄▄▄▄▄ 
  █   █ 
@@ -236,7 +236,7 @@ should('Embed', () => {
     .embed({ x: 0, y: -(finder.height - 1) }, finder.rectSlice({ x: 1, y: 0 })); // bottom left
 
   b = b.border(2);
-  console.log(b.toASCII());
+  // console.log(b.toASCII());
   const exp = strip(`
 █████████████████████████
 ██ ▄▄▄▄▄ █     █ ▄▄▄▄▄ ██
@@ -275,7 +275,7 @@ X         X
  X       X 
 X         X`);
   deepStrictEqual(b.toString(), cross);
-  console.log(b.toASCII());
+  // console.log(b.toASCII());
   b = b.scale(3);
   const crossScaled = strip(`
 XXX                           XXX

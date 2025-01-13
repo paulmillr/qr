@@ -129,7 +129,7 @@ should('qr v10', () => {
 `.replace('\n', '')
   );
   const v10_6 = _tests.drawQR(10, 'low', v10_data, 6).border(2);
-  console.log(v10_6.toASCII());
+  // console.log(v10_6.toASCII());
   deepStrictEqual(
     v10_6.toASCII(),
     `
@@ -167,7 +167,7 @@ should('qr v10', () => {
 `.replace('\n', '')
   );
   const v10_1 = _tests.drawQR(10, 'low', v10_data, 1).border(2);
-  console.log(v10_1.toASCII());
+  // console.log(v10_1.toASCII());
   deepStrictEqual(
     v10_1.toASCII(),
     `
@@ -207,7 +207,7 @@ should('qr v10', () => {
 });
 
 should('qr v20', () => {
-  console.log('V20');
+  // console.log('V20');
   const v20_data = new Uint8Array([
     32, 17, 236, 17, 17, 17, 17, 17, 2, 236, 17, 236, 236, 236, 236, 236, 80, 17, 236, 17, 17, 17,
     17, 17, 0, 236, 17, 236, 236, 236, 236, 236, 236, 17, 236, 17, 17, 17, 17, 17, 17, 236, 17, 236,
@@ -429,7 +429,7 @@ for (let i = 0; i < TEST_CASES.length; i++) {
 
 should('Full API test url', () => {
   const q = encodeQR('https://www.youtube.com/watch?v=eBGIQ7ZuuiU', 'ascii');
-  console.log(q);
+  // console.log(q);
   const exp = `
 █████████████████████████████████████
 ██ ▄▄▄▄▄ █  ▀▄▄█ ██▀▄▄▄▄█ ▀█ ▄▄▄▄▄ ██

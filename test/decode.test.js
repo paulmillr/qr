@@ -67,7 +67,7 @@ should('FindFinder', () => {
 should('Detector', () => {
   const bmp = _tests.toBitmap(readJPEG(DIR + 'detection/blurred/image007.jpg'));
   const { bits, points } = _tests.detect(bmp);
-  console.log(bits.toASCII());
+  // console.log(bits.toASCII());
   const ascii = `
  ▄▄▄▄▄ █▀▄█▀ █▀ ▀▀ ▄▀█ ▄▄▄▄▄ 
  █   █ █▄   ▄█ ██▄▀▄██ █   █ 
@@ -408,7 +408,7 @@ for (const category of listFiles(DETECTION_PATH, true)) {
       if (decoded !== undefined) hadDecoded++;
       // Skip files for which we don't have decoded information
       if (decoded === undefined) continue;
-      console.log('Decoding', p.replace(DIR, ''));
+      // console.log('Decoding', p.replace(DIR, ''));
       let res;
       try {
         res = readQR(jpg);
@@ -429,12 +429,12 @@ for (const category of listFiles(DETECTION_PATH, true)) {
     const p1 = percent(hadDecoded, count);
     const p2 = percent(currDecoded, count);
     const p3 = percent(currDecoded, hadDecoded);
-    console.log(
-`${category}
-  total: ${count}
-  decoded before: ${hadDecoded} (${p1} of total)
-  decoded now: ${currDecoded} (${p2} of total, ${p3} of decoded before)`
-    );
+//     console.log(
+// `${category}
+//   total: ${count}
+//   decoded before: ${hadDecoded} (${p1} of total)
+//   decoded now: ${currDecoded} (${p2} of total, ${p3} of decoded before)`
+//     );
   });
 }
 
