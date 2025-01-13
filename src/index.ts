@@ -19,6 +19,17 @@ limitations under the License.
  * Methods for encoding (generating) QR code patterns.
  * Check out decode.ts for decoding (reading).
  * @module
+ * @example
+```js
+import encodeQR from '@paulmillr/qr';
+const txt = 'Hello world';
+const ascii = encodeQR(txt, 'ascii'); // Not all fonts are supported
+const terminalFriendly = encodeQR(txt, 'term'); // 2x larger, all fonts are OK
+const gifBytes = encodeQR(txt, 'gif'); // Uncompressed GIF
+const svgElement = encodeQR(txt, 'svg'); // SVG vector image element
+const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
+// import decodeQR from '@paulmillr/qr/decode';
+```
  */
 
 // We do not use newline escape code directly in strings because it's not parser-friendly
@@ -376,12 +387,17 @@ export class Bitmap {
 // End of utils
 
 // Runtime type-checking
-// Low: 7%, medium: 15%, quartile: 25%, high: 30%
+/** Error correction mode. low: 7%, medium: 15%, quartile: 25%, high: 30% */
 export const ECMode = ['low', 'medium', 'quartile', 'high'] as const;
+/** Error correction mode. */
 export type ErrorCorrection = (typeof ECMode)[number];
+/** QR Code version. */
 export type Version = number; // 1..40
+/** QR Code mask type */
 export type Mask = (0 | 1 | 2 | 3 | 4 | 5 | 6 | 7) & keyof typeof PATTERNS; // 0..7
+/** QR Code encoding */
 export const Encoding = ['numeric', 'alphanumeric', 'byte', 'kanji', 'eci'] as const;
+/** QR Code encoding type */
 export type EncodingType = (typeof Encoding)[number];
 
 // Various constants & tables
@@ -988,7 +1004,8 @@ function drawQRBest(ver: Version, ecc: ErrorCorrection, data: Uint8Array, maskId
   return drawQR(ver, ecc, data, maskIdx);
 }
 
-type QrOpts = {
+/** QR Code generation options. */
+export type QrOpts = {
   ecc?: ErrorCorrection;
   encoding?: EncodingType;
   version?: Version;
@@ -1010,7 +1027,23 @@ function validateMask(mask: Mask) {
   if (![0, 1, 2, 3, 4, 5, 6, 7].includes(mask) || !PATTERNS[mask])
     throw new Error(`Invalid mask=${mask}. Expected number [0..7]`);
 }
-type Output = 'raw' | 'ascii' | 'term' | 'gif' | 'svg';
+export type Output = 'raw' | 'ascii' | 'term' | 'gif' | 'svg';
+
+/**
+ * Encodes (creates / generates) QR code.
+ * @param text text that would be encoded
+ * @param output output type: raw, ascii, svg, gif, or term
+ * @param opts
+ * @example
+```js
+const txt = 'Hello world';
+const ascii = encodeQR(txt, 'ascii'); // Not all fonts are supported
+const terminalFriendly = encodeQR(txt, 'term'); // 2x larger, all fonts are OK
+const gifBytes = encodeQR(txt, 'gif'); // Uncompressed GIF
+const svgElement = encodeQR(txt, 'svg'); // SVG vector image element
+const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
+```
+ */
 export function encodeQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
 export function encodeQR(text: string, output: 'ascii' | 'term' | 'svg', opts?: QrOpts): string;
 export function encodeQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;

@@ -17,6 +17,10 @@ limitations under the License.
 /**
  * Methods for decoding (reading) QR code patterns.
  * @module
+ * @example
+```js
+
+```
  */
 
 import type { EncodingType, ErrorCorrection, Image, Point, Mask } from './index.js';
