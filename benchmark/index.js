@@ -1,7 +1,7 @@
-import { deepStrictEqual } from 'assert';
+import { deepStrictEqual } from 'node:assert';
 import { run, mark } from 'micro-bmark';
 import * as jpeg from 'jpeg-js';
-import * as fs from 'fs';
+import * as fs from 'node:fs';
 import encodeQR from '../esm/index.js';
 import decodeQR from '../esm/decode.js';
 // Other libraries

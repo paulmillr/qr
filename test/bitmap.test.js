@@ -1,4 +1,4 @@
-import { deepStrictEqual } from 'assert';
+import { deepStrictEqual } from 'node:assert';
 import { should } from 'micro-should';
 import { GifReader } from 'omggif';
 import encodeQR, { _tests } from '../esm/index.js';
@@ -355,8 +355,4 @@ should('GIF encode', () => {
   }
 });
 
-// ESM is broken.
-import url from 'url';
-if (import.meta.url === url.pathToFileURL(process.argv[1]).href) {
-  should.run();
-}
+should.runWhen(import.meta.url);

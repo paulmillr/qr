@@ -1,6 +1,6 @@
-import { deepStrictEqual } from 'assert';
-import { readFileSync } from 'fs';
-import { gunzipSync } from 'zlib';
+import { deepStrictEqual } from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { should } from 'micro-should';
 import encodeQR, { _tests } from '../esm/index.js';
 const jsonGZ = (path) => JSON.parse(gunzipSync(readFileSync(path)));
@@ -454,8 +454,4 @@ should('Full API test url', () => {
   deepStrictEqual(q, exp);
 });
 
-// ESM is broken.
-import url from 'url';
-if (import.meta.url === url.pathToFileURL(process.argv[1]).href) {
-  should.run();
-}
+should.runWhen(import.meta.url);

@@ -1,4 +1,4 @@
-import { deepStrictEqual } from 'assert';
+import { deepStrictEqual } from 'node:assert';
 import { should } from 'micro-should';
 import { _tests } from '../esm/index.js';
 
@@ -335,8 +335,4 @@ should('encodeData', () => {
   }
 });
 
-// ESM is broken.
-import url from 'url';
-if (import.meta.url === url.pathToFileURL(process.argv[1]).href) {
-  should.run();
-}
+should.runWhen(import.meta.url);

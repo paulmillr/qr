@@ -1,6 +1,6 @@
-import { deepStrictEqual } from 'assert';
+import { deepStrictEqual } from 'node:assert';
 import { should } from 'micro-should';
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { decode as jpegDecode } from 'jpeg-js';
 import readQR, { _tests } from '../esm/decode.js';
 
@@ -446,8 +446,4 @@ for (const category of listFiles(DETECTION_PATH, true)) {
 //   console.log('DECODED', res);
 // });
 
-// ESM is broken.
-import url from 'url';
-if (import.meta.url === url.pathToFileURL(process.argv[1]).href) {
-  should.run();
-}
+should.runWhen(import.meta.url);
