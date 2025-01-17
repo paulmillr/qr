@@ -43,7 +43,9 @@
     "build": "tsc && tsc -p tsconfig.esm.json",
     "lint": "prettier --check src",
     "format": "prettier --write src",
-    "test": "node test/index.js"
+    "test": "node test/index.js",
+    "test:bun": "bun test/index.js",
+    "test:deno": "deno test/index.js"
   },
   "exports": {
     ".": {
