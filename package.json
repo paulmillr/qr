@@ -45,7 +45,7 @@
     "format": "prettier --write src",
     "test": "node test/index.js",
     "test:bun": "bun test/index.js",
-    "test:deno": "deno test/index.js"
+    "test:deno": "deno --allow-env --allow-read test/index.js"
   },
   "exports": {
     ".": {
