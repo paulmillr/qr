@@ -5,4 +5,6 @@ on:
 jobs:
   test-js:
     name: 'JS v0.2.2' # v0.2.2 == commit below
-    uses: paulmillr/jsbt/.github/workflows/test-js.yml@986dbfea9667eeb0e81bf606cbe9ed169fea89b2
+    uses: paulmillr/jsbt/.github/workflows/test-js.yml@698d27bde26a862e1e0d21354ee0d72174539181
+    with:
+      clone-submodules: true

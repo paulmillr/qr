@@ -29,6 +29,6 @@ export function jsonGZ(path) {
 const vectorPath = joinPath(_dirname, 'vectors', 'boofcv-v3');
 export const DETECTION_PATH = joinPath(vectorPath, 'detection');
 export function readJPEG(path) {
-  console.log('readJPEG', vectorPath, path);
+  // console.log('readJPEG', vectorPath, path);
   return jpegDecode(readFileSync(joinPath(vectorPath, path)));
 }
