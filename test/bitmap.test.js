@@ -1,5 +1,5 @@
-import { deepStrictEqual } from 'node:assert';
 import { should } from 'micro-should';
+import { deepStrictEqual } from 'node:assert';
 import { GifReader } from 'omggif';
 import encodeQR, { _tests } from '../esm/index.js';
 const { Bitmap } = _tests;

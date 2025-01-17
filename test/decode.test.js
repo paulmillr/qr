@@ -1,14 +1,8 @@
-import { deepStrictEqual } from 'node:assert';
 import { should } from 'micro-should';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { decode as jpegDecode } from 'jpeg-js';
+import { deepStrictEqual } from 'node:assert';
+import { readdirSync, statSync } from 'node:fs';
 import readQR, { _tests } from '../esm/decode.js';
-
-const DIR = './test/vectors/boofcv-v3/';
-
-function readJPEG(path) {
-  return jpegDecode(readFileSync(path))
-}
+import { DETECTION_PATH, readJPEG } from './utils.js';
 
 function parseCoordinates(c) {
   const qrSize = 4 * 2;
@@ -55,7 +49,7 @@ should('parseCoordinates', () => {
 });
 
 should('FindFinder', () => {
-  const bmp = _tests.toBitmap(readJPEG(DIR + 'detection/blurred/image007.jpg'));
+  const bmp = _tests.toBitmap(readJPEG('detection/blurred/image007.jpg'));
   const finder = _tests.findFinder(bmp);
   deepStrictEqual(finder, {
     bl: { x: 357.5, y: 659.5, moduleSize: 5.142857142857143, count: 2 },
@@ -65,7 +59,7 @@ should('FindFinder', () => {
 });
 
 should('Detector', () => {
-  const bmp = _tests.toBitmap(readJPEG(DIR + 'detection/blurred/image007.jpg'));
+  const bmp = _tests.toBitmap(readJPEG('detection/blurred/image007.jpg'));
   const { bits, points } = _tests.detect(bmp);
   // console.log(bits.toASCII());
   const ascii = `
@@ -95,7 +89,7 @@ should('Detector', () => {
 });
 
 should('Decode', () => {
-  const f = DIR + 'detection/blurred/image007.jpg';
+  const f = 'detection/blurred/image007.jpg';
   const bmp = _tests.toBitmap(readJPEG(f));
   const { bits } = _tests.detect(bmp);
   const res = _tests.decodeBitmap(bits);
@@ -107,8 +101,6 @@ const listFiles = (path, isDir = false) =>
 
 const percent = (a, b) => `${((a / b) * 100).toFixed(2)}%`;
 
-const DETECTION_PATH = DIR + 'detection';
-
 // for (const category of listFiles(DETECTION_PATH, true)) {
 //   const DIR_PATH = `${DETECTION_PATH}/${category}`;
 //   should(`Decoding/${category}`, () => {
@@ -116,12 +108,12 @@ const DETECTION_PATH = DIR + 'detection';
 //       if (!f.endsWith('.jpg')) continue;
 //       const p = `${DIR_PATH}/${f}`;
 //       const EXCLUDE = [
-//         DIR + 'detection/blurred/image001.jpg',
-//         DIR + 'detection/blurred/image002.jpg',
-//         DIR + 'detection/blurred/image003.jpg',
-//         DIR + 'detection/blurred/image004.jpg',
-//         DIR + 'detection/blurred/image005.jpg',
-//         DIR + 'detection/blurred/image006.jpg',
+//         'detection/blurred/image001.jpg',
+//         'detection/blurred/image002.jpg',
+//         'detection/blurred/image003.jpg',
+//         'detection/blurred/image004.jpg',
+//         'detection/blurred/image005.jpg',
+//         'detection/blurred/image006.jpg',
 //       ];
 //       if (EXCLUDE.includes(p)) continue;
 //       console.log('FILE', p);
@@ -369,38 +361,38 @@ for (const category of listFiles(DETECTION_PATH, true)) {
     let currDecoded = 0;
     for (const f of listFiles(DIR_PATH)) {
       if (!f.endsWith('.jpg')) continue;
-      const p = `${DIR_PATH}/${f}`;
+      const p = `detection/${category}/${f}`;
       const EXCLUDE = [
-        DIR + 'detection/blurred/image025.jpg',
-        DIR + 'detection/brightness/image006.jpg',
-        DIR + 'detection/brightness/image007.jpg',
-        DIR + 'detection/curved/image015.jpg',
-        DIR + 'detection/curved/image022.jpg',
-        DIR + 'detection/curved/image049.jpg',
-        DIR + 'detection/glare/image050.jpg',
-        DIR + 'detection/high_version/image031.jpg',
-        DIR + 'detection/high_version/image032.jpg',
-        DIR + 'detection/nominal/image015.jpg',
-        DIR + 'detection/nominal/image020.jpg',
-        DIR + 'detection/nominal/image021.jpg',
-        DIR + 'detection/nominal/image022.jpg',
-        DIR + 'detection/nominal/image023.jpg',
-        DIR + 'detection/nominal/image055.jpg',
-        DIR + 'detection/perspective/image001.jpg',
-        DIR + 'detection/perspective/image002.jpg',
-        DIR + 'detection/perspective/image003.jpg',
-        DIR + 'detection/perspective/image004.jpg',
-        DIR + 'detection/perspective/image005.jpg',
-        DIR + 'detection/perspective/image006.jpg',
-        DIR + 'detection/perspective/image007.jpg',
-        DIR + 'detection/rotations/image017.jpg',
-        DIR + 'detection/rotations/image018.jpg',
-        DIR + 'detection/rotations/image023.jpg',
-        DIR + 'detection/rotations/image040.jpg',
-        DIR + 'detection/shadows/image007.jpg',
-        DIR + 'detection/shadows/image008.jpg',
+        'blurred/image025.jpg',
+        'brightness/image006.jpg',
+        'brightness/image007.jpg',
+        'curved/image015.jpg',
+        'curved/image022.jpg',
+        'curved/image049.jpg',
+        'glare/image050.jpg',
+        'high_version/image031.jpg',
+        'high_version/image032.jpg',
+        'nominal/image015.jpg',
+        'nominal/image020.jpg',
+        'nominal/image021.jpg',
+        'nominal/image022.jpg',
+        'nominal/image023.jpg',
+        'nominal/image055.jpg',
+        'perspective/image001.jpg',
+        'perspective/image002.jpg',
+        'perspective/image003.jpg',
+        'perspective/image004.jpg',
+        'perspective/image005.jpg',
+        'perspective/image006.jpg',
+        'perspective/image007.jpg',
+        'rotations/image017.jpg',
+        'rotations/image018.jpg',
+        'rotations/image023.jpg',
+        'rotations/image040.jpg',
+        'shadows/image007.jpg',
+        'shadows/image008.jpg',
       ];
-      if (EXCLUDE.includes(p)) continue;
+      if (EXCLUDE.some((end) => p.endsWith(end))) continue;
       count += 1;
       // Slow as hell, but at least doesn't force binary modules for nodejs in dev env
       const jpg = readJPEG(p);
@@ -429,18 +421,18 @@ for (const category of listFiles(DETECTION_PATH, true)) {
     const p1 = percent(hadDecoded, count);
     const p2 = percent(currDecoded, count);
     const p3 = percent(currDecoded, hadDecoded);
-//     console.log(
-// `${category}
-//   total: ${count}
-//   decoded before: ${hadDecoded} (${p1} of total)
-//   decoded now: ${currDecoded} (${p2} of total, ${p3} of decoded before)`
-//     );
+    //     console.log(
+    // `${category}
+    //   total: ${count}
+    //   decoded before: ${hadDecoded} (${p1} of total)
+    //   decoded now: ${currDecoded} (${p2} of total, ${p3} of decoded before)`
+    //     );
   });
 }
 
 // should.only('DEBUG', () => {
-//   //const f = DIR + 'detection/high_version/image031.jpg';
-//   const f = DIR + 'detection/high_version/image032.jpg';
+//   //const f = 'detection/high_version/image031.jpg';
+//   const f = 'detection/high_version/image032.jpg';
 //   const jpg = readJPEG(f);
 //   const res = readQR(jpg);
 //   console.log('DECODED', res);

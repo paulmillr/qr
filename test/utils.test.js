@@ -1,5 +1,5 @@
+import { describe, should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
-import { should, describe } from 'micro-should';
 import { _tests } from '../esm/index.js';
 
 const ALIGNMENT_PATTERN_POSITIONS = [
@@ -55,22 +55,22 @@ describe('utils', () => {
       );
     }
   });
-  
+
   should('sizeType', () => {
     const names = ['small', 'medium', 'large'];
-  
+
     const exp = [];
     for (let i = 1; i <= 9; i++) exp.push('small'); // SMALL("version 1-9"),
     for (let i = 10; i <= 26; i++) exp.push('medium'); // MEDIUM("version 10-26"),
     for (let i = 27; i <= 40; i++) exp.push('large'); // LARGE("version 27-40"),
-  
+
     const actual = [];
     for (let ver = 1; ver <= 40; ver++) {
       actual.push(names[_tests.info.sizeType(ver)]);
     }
     deepStrictEqual(actual, exp);
   });
-  
+
   should('versionBits', () => {
     const VECTORS = {
       7: 0x07c94,
@@ -112,7 +112,7 @@ describe('utils', () => {
       deepStrictEqual(_tests.info.versionBits(ver), VECTORS[ver], ver);
     }
   });
-  
+
   should('bitLimit', () => {
     const VECTORS = [
       { l: 152, m: 128, q: 104, h: 72 },
@@ -159,21 +159,21 @@ describe('utils', () => {
     for (let i = 0; i < VECTORS.length; i++) {
       const ver = i + 1;
       const v = VECTORS[i];
-  
+
       for (const ecc of ['l', 'm', 'q', 'h']) {
         const eccName = { l: 'low', m: 'medium', q: 'quartile', h: 'high' }[ecc];
         deepStrictEqual(_tests.info.capacity(ver, eccName).capacity, v[ecc]);
       }
     }
   });
-  
+
   describe('crosstest', () => {
     should('formatBits', () => {
       // NOTE: copy-paste from python qr-code, for verification only.
       // Remove, so we don't need to include license
       const G15 = (1 << 10) | (1 << 8) | (1 << 5) | (1 << 4) | (1 << 2) | (1 << 1) | (1 << 0);
       const G15_MASK = (1 << 14) | (1 << 12) | (1 << 10) | (1 << 4) | (1 << 1);
-    
+
       function BCH_digit(data) {
         let digit = 0;
         while (data != 0) {
@@ -195,11 +195,11 @@ describe('utils', () => {
           deepStrictEqual(_tests.info.formatBits(ecc, mask_pattern), BCH_type_info(data));
         }
     });
-    
+
     should('versionBits', () => {
       var G18 =
         (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 5) | (1 << 2) | (1 << 0);
-    
+
       function BCH_digit(data) {
         let digit = 0;
         while (data != 0) {
@@ -208,7 +208,7 @@ describe('utils', () => {
         }
         return digit;
       }
-    
+
       function BCH_type_number(data) {
         let d = data << 12;
         while (BCH_digit(d) - BCH_digit(G18) >= 0) {
