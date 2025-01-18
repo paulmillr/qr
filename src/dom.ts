@@ -23,7 +23,7 @@ limitations under the License.
  * @module
  */
 
-import decodeQR, { DecodeOpts, FinderPoints } from './decode.js';
+import decodeQR, { type DecodeOpts, type FinderPoints } from './decode.js';
 import type { Image } from './index.js';
 
 export const getSize = (

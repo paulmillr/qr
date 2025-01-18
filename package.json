@@ -24,7 +24,7 @@
   "types": "index.d.ts",
   "sideEffects": false,
   "devDependencies": {
-    "@paulmillr/jsbt": "0.2.1",
+    "@paulmillr/jsbt": "0.3.0",
     "jpeg-js": "0.4.4",
     "micro-bmark": "0.3.1",
     "micro-should": "0.5.0",
@@ -40,7 +40,8 @@
     "url": "git+https://github.com/paulmillr/qr.git"
   },
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.esm.json",
+    "build": "tsc && tsc -p tsconfig.cjs.json",
+    "build:release": "npx jsbt esbuild test/build",
     "lint": "prettier --check src",
     "format": "prettier --write src",
     "test": "node test/index.js",

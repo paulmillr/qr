@@ -4,7 +4,5 @@ on:
   - pull_request
 jobs:
   test-js:
-    name: 'JS v0.2.2' # v0.2.2 == commit below
-    uses: paulmillr/jsbt/.github/workflows/test-js.yml@698d27bde26a862e1e0d21354ee0d72174539181
-    with:
-      clone-submodules: true
+    name: 'jsbt v0.3.0' # Should match commit below
+    uses: paulmillr/jsbt/.github/workflows/test-js.yml@973650a225c0344aa5f993a6cd63835a262077e9

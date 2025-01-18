@@ -1,4 +1,4 @@
-build/
+test/build/
 node_modules/
 coverage/
 /*.js
