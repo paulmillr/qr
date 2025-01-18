@@ -24,7 +24,7 @@
   "types": "index.d.ts",
   "sideEffects": false,
   "devDependencies": {
-    "@paulmillr/jsbt": "0.3.0",
+    "@paulmillr/jsbt": "0.3.1",
     "jpeg-js": "0.4.4",
     "micro-bmark": "0.3.1",
     "micro-should": "0.5.1",
