@@ -13,6 +13,7 @@ Check out:
 - [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/) - interactive demo 
 - [qrBTF.com](https://qrbtf.com/en) - uses the library to generate custom, styled codes
 - [cuer](https://github.com/wevm/cuer) - React component based on the library
+- [metamask-sdk](https://github.com/MetaMask/metamask-sdk/blob/3d0ba19610853ec9259bb1aad459b1eaea799375/packages/sdk/package.json#L56) - is using the library
 
 Why other libraries are less optimal:
 
