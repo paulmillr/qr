@@ -1,7 +1,7 @@
 {
-  "name": "@paulmillr/qr",
-  "version": "0.3.0",
-  "description": "Minimal browser & node.js QR Code Pattern reader and generator. Supports ascii, term, gif and svg formats",
+  "name": "qr",
+  "version": "0.4.0",
+  "description": "Minimal 0-dep QR code generator & reader. Supports ascii, term, gif and svg formats",
   "files": [
     "esm",
     "index.js",

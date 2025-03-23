@@ -1,6 +1,6 @@
 # paulmillr-qr
 
-Minimal browser and node.js QR Code Pattern encoder & decoder.
+Minimal 0-dep QR code generator & reader.
 
 - 🔒 Auditable, 0-dependency
 - 🏞️ Encoding (generating) supports ASCII, term, gif and svg codes
@@ -10,7 +10,7 @@ Minimal browser and node.js QR Code Pattern encoder & decoder.
 
 Check out:
 
-- [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/) - interactive demo 
+- [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/) - interactive demo
 - [qrBTF.com](https://qrbtf.com/en) - uses the library to generate custom, styled codes
 - [cuer](https://github.com/wevm/cuer) - React component based on the library
 - [metamask-sdk](https://github.com/MetaMask/metamask-sdk/blob/3d0ba19610853ec9259bb1aad459b1eaea799375/packages/sdk/package.json#L56) - is using the library
@@ -22,9 +22,9 @@ Why other libraries are less optimal:
 
 ## Usage
 
-A standalone file [paulmillr-qr.js](https://github.com/paulmillr/qr/releases) is also available.
+A standalone file [qr.js](https://github.com/paulmillr/qr/releases) is also available.
 
-> `npm install @paulmillr/qr`
+> `npm install qr`
 
 > `jsr add jsr:@paulmillr/qr`
 
