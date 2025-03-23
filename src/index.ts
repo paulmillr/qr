@@ -1006,12 +1006,12 @@ function drawQRBest(ver: Version, ecc: ErrorCorrection, data: Uint8Array, maskId
 
 /** QR Code generation options. */
 export type QrOpts = {
-  ecc?: ErrorCorrection;
-  encoding?: EncodingType;
-  version?: Version;
-  mask?: number;
-  border?: number;
-  scale?: number;
+  ecc?: ErrorCorrection | undefined;
+  encoding?: EncodingType | undefined;
+  version?: Version | undefined;
+  mask?: number | undefined;
+  border?: number | undefined;
+  scale?: number | undefined;
 };
 function validateECC(ec: ErrorCorrection) {
   if (!ECMode.includes(ec))
