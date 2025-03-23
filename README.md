@@ -8,10 +8,13 @@ Minimal browser and node.js QR Code Pattern encoder & decoder.
 - 🔍 Extensive tests ensure correctness: 100MB+ of vectors
 - 🪶 35KB for encoding + decoding, 18KB for encoding (1000 lines of code)
 
-Check out interactive demo [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/) and
-[qrBTF.com](https://qrbtf.com/en), which uses the library to generate custom, styled codes.
+Check out:
 
-Other JS libraries are bad:
+- [paulmillr.com/apps/qr/](https://paulmillr.com/apps/qr/) - interactive demo 
+- [qrBTF.com](https://qrbtf.com/en) - uses the library to generate custom, styled codes
+- [cuer](https://github.com/wevm/cuer) - React component based on the library
+
+Why other libraries are less optimal:
 
 - [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR and doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) is broken version of jsQR and doesn't work outside of browser, [qrcode](https://github.com/nuintun/qrcode) is fork of jsQR without adoption
 - [instascan](https://github.com/schmich/instascan) is too big: over 1MB+ (it's zxing compiled to js via emscripten)
