@@ -41,9 +41,9 @@ A standalone file [qr.js](https://github.com/paulmillr/qr/releases) is also avai
 ## Encoding
 
 ```ts
-import encodeQR from '@paulmillr/qr';
+import encodeQR from 'qr';
 
-// import decodeQR from '@paulmillr/qr/decode';
+// import decodeQR from 'qr/decode';
 // See separate README section for decoding.
 
 const txt = 'Hello world';
@@ -99,9 +99,9 @@ GIF reader is not included in the package (it would take a lot of space).
 Decoding raw bitmap is still possible.
 
 ```js
-import encodeQR from '@paulmillr/qr';
-import decodeQR from '@paulmillr/qr/decode';
-import { Bitmap } from '@paulmillr/qr';
+import encodeQR from 'qr';
+import decodeQR from 'qr/decode';
+import { Bitmap } from 'qr';
 
 // Scale so it would be 100x100 instead of 25x25
 const opts = { scale: 4 };
@@ -136,7 +136,7 @@ function decodeWithExternal() {
 }
 
 // c) draw gif/svg to browser DOM canvas
-import { svgToPng } from '@paulmillr/qr/dom';
+import { svgToPng } from 'qr/dom';
 const png = svgToPng(encodeQR('Hello world', 'svg'), 512, 512);
 ```
 
@@ -264,7 +264,7 @@ Copyright (c) 2023 Paul Miller (paulmillr.com)
 
 Copyright (c) 2019 ZXing authors
 
-The library @paulmillr/qr is dual-licensed under the Apache 2.0 OR MIT license.
+The library paulmillr-qr is dual-licensed under the Apache 2.0 OR MIT license.
 You can select a license of your choice.
 
 The library contains code inspired by [ZXing](https://github.com/zxing/zxing), which is licensed under Apache 2.0.
