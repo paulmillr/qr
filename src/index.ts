@@ -340,15 +340,43 @@ export class Bitmap {
   }
   toSVG(): string {
     let out = `<svg xmlns:svg="http://www.w3.org/2000/svg" viewBox="0 0 ${this.width} ${this.height}" version="1.1" xmlns="http://www.w3.org/2000/svg">`;
-    this.rectRead(0, Infinity, ({ x, y }, val) => {
-      if (val) out += `<rect x="${x}" y="${y}" width="1" height="1" />`;
+    // Construct optimized SVG path data.
+    let pathData = '';
+    let prevPoint: Point | undefined;
+    this.rectRead(0, Infinity, (point, val) => {
+      if (!val) return;
+      const { x, y } = point;
+
+      // https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/d#path_commands
+
+      // Determine the shortest way to represent the initial cursor movement.
+      // M - Move cursor (without drawing) to absolute coordinate pair.
+      let m = `M${x} ${y}`;
+      // Only allow using the relative cursor move command if previous points
+      // were drawn.
+      if (prevPoint) {
+        // m - Move cursor (without drawing) to relative coordinate pair.
+        const relM = `m${x - prevPoint.x} ${y - prevPoint.y}`;
+        if (relM.length <= m.length) m = relM;
+      }
+
+      // Determine the shortest way to represent the cell's bottom line draw.
+      // H - Draw line from cursor position to absolute x coordinate.
+      // h - Draw line from cursor position to relative x coordinate.
+      const bH = x < 10 ? `H${x}` : 'h-1';
+
+      // v - Draw line from cursor position to relative y coordinate.
+      // Z - Close path (draws line from cursor position to M coordinate).
+      pathData += `${m}h1v1${bH}Z`;
+      prevPoint = point;
     });
-    out += '</svg>';
+    out += `<path d="${pathData}"/>`;
+    out += `</svg>`;
     return out;
   }
   toGIF(): Uint8Array {
     // NOTE: Small, but inefficient implementation.
-    // Uses 1 byte per pixel, but still less bloated than SVG.
+    // Uses 1 byte per pixel.
     const u16le = (i: number) => [i & 0xff, (i >>> 8) & 0xff];
     const dims = [...u16le(this.width), ...u16le(this.height)];
     const data: number[] = [];
