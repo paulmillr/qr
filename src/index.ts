@@ -339,7 +339,7 @@ export class Bitmap {
       .join(String.fromCharCode(chCodes.newline));
   }
   toSVG(): string {
-    let out = `<svg xmlns:svg="http://www.w3.org/2000/svg" viewBox="0 0 ${this.width} ${this.height}" version="1.1" xmlns="http://www.w3.org/2000/svg">`;
+    let out = `<svg viewBox="0 0 ${this.width} ${this.height}" version="1.1" xmlns="http://www.w3.org/2000/svg">`;
     // Construct optimized SVG path data.
     let pathData = '';
     let prevPoint: Point | undefined;
