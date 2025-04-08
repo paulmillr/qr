@@ -323,6 +323,8 @@ export function svgToPng(svgData: string, width: number, height: number): Promis
     const doc = domparser.parseFromString(svgData, 'image/svg+xml');
 
     const svgElement = doc.documentElement;
+    svgElement.setAttribute('width', String(width));
+    svgElement.setAttribute('height', String(height));
     const rect = doc.createElementNS('http://www.w3.org/2000/svg', 'rect');
 
     rect.setAttribute('width', '100%');
