@@ -338,7 +338,7 @@ export class Bitmap {
       .map((i) => i.map((j) => (j ? darkBG : whiteBG)).join(''))
       .join(String.fromCharCode(chCodes.newline));
   }
-  toSVG(): string {
+  toSVG(optimize = true): string {
     let out = `<svg viewBox="0 0 ${this.width} ${this.height}" xmlns="http://www.w3.org/2000/svg">`;
     // Construct optimized SVG path data.
     let pathData = '';
@@ -346,6 +346,11 @@ export class Bitmap {
     this.rectRead(0, Infinity, (point, val) => {
       if (!val) return;
       const { x, y } = point;
+
+      if (!optimize) {
+        out += `<rect x="${x}" y="${y}" width="1" height="1" />`;
+        return;
+      }
 
       // https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/d#path_commands
 
@@ -370,7 +375,7 @@ export class Bitmap {
       pathData += `${m}h1v1${bH}Z`;
       prevPoint = point;
     });
-    out += `<path d="${pathData}"/>`;
+    if (optimize) out += `<path d="${pathData}"/>`;
     out += `</svg>`;
     return out;
   }
@@ -1041,6 +1046,26 @@ export type QrOpts = {
   border?: number | undefined;
   scale?: number | undefined;
 };
+export type SvgQrOpts = {
+  /**
+   * Controls how cells are generated within the SVG.
+   *
+   * If `true`:
+   *   - Cells are drawn using a single `path` element.
+   *   - Pro: significantly reduces the size of the QR code (>70% smaller than
+   *     unoptimized).
+   *   - Con: less flexible with visually customizing cell shapes.
+   *
+   * If `false`:
+   *   - Each cell is drawn with its own `rect` element.
+   *   - Pro: allows more flexibility with visually customizing cells shapes.
+   *   - Con: significantly increases the QR code size (>230% larger than
+   *     optimized).
+   *
+   * @default true
+   */
+  optimize?: boolean | undefined;
+};
 function validateECC(ec: ErrorCorrection) {
   if (!ECMode.includes(ec))
     throw new Error(`Invalid error correction mode=${ec}. Expected: ${ECMode}`);
@@ -1073,9 +1098,10 @@ const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
 ```
  */
 export function encodeQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
-export function encodeQR(text: string, output: 'ascii' | 'term' | 'svg', opts?: QrOpts): string;
+export function encodeQR(text: string, output: 'ascii' | 'term', opts?: QrOpts): string;
+export function encodeQR(text: string, output: 'svg', opts?: QrOpts & SvgQrOpts): string;
 export function encodeQR(text: string, output: 'gif', opts?: QrOpts): Uint8Array;
-export function encodeQR(text: string, output: Output = 'raw', opts: QrOpts = {}) {
+export function encodeQR(text: string, output: Output = 'raw', opts: QrOpts & SvgQrOpts = {}) {
   const ecc = opts.ecc !== undefined ? opts.ecc : 'medium';
   validateECC(ecc);
   const encoding = opts.encoding !== undefined ? opts.encoding : detectType(text);
@@ -1109,7 +1135,7 @@ export function encodeQR(text: string, output: Output = 'raw', opts: QrOpts = {}
   if (opts.scale !== undefined) res = res.scale(opts.scale); // Scale image
   if (output === 'raw') return res.data;
   else if (output === 'ascii') return res.toASCII();
-  else if (output === 'svg') return res.toSVG();
+  else if (output === 'svg') return res.toSVG(opts.optimize);
   else if (output === 'gif') return res.toGIF();
   else if (output === 'term') return res.toTerm();
   else throw new Error(`Unknown output: ${output}`);
