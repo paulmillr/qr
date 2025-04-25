@@ -30,11 +30,11 @@
     "global-jsdom": "26.0.0",
     "jpeg-js": "0.4.4",
     "jsdom": "26.0.0",
-    "micro-bmark": "0.4.0",
-    "micro-should": "0.5.1",
+    "micro-bmark": "0.4.1",
+    "micro-should": "0.5.2",
     "omggif": "1.0.10",
-    "prettier": "3.5.2",
-    "typescript": "5.8.2"
+    "prettier": "3.5.3",
+    "typescript": "5.8.3"
   },
   "author": "Paul Miller (https://paulmillr.com)",
   "license": "(MIT OR Apache-2.0)",

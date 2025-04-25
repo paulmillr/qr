@@ -23,8 +23,8 @@ limitations under the License.
 ```
  */
 
-import type { EncodingType, ErrorCorrection, Image, Point, Mask } from './index.js';
-import { Bitmap, utils } from './index.js';
+import type { EncodingType, ErrorCorrection, Image, Mask, Point } from './index.ts';
+import { Bitmap, utils } from './index.ts';
 const { best, bin, drawTemplate, fillArr, info, interleave, validateVersion, zigzag } = utils;
 
 // Constants
