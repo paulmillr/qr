@@ -1,10 +1,8 @@
 import { should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
-import { readFileSync } from 'node:fs';
-import { gunzipSync } from 'node:zlib';
 import encodeQR, { _tests } from '../esm/index.js';
-const jsonGZ = (path) => JSON.parse(gunzipSync(readFileSync(path)));
-const TEST_CASES = jsonGZ('./test/vectors/small-vectors.json.gz');
+import { jsonGZ } from './utils.js';
+const TEST_CASES = jsonGZ('vectors/small-vectors.json.gz');
 
 should('qr v1', () => {
   const v1_data = new Uint8Array([

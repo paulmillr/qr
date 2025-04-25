@@ -25,14 +25,8 @@
   "sideEffects": false,
   "devDependencies": {
     "@paulmillr/jsbt": "0.3.3",
-    "@types/jsdom": "21.1.7",
-    "canvas": "3.1.0",
-    "global-jsdom": "26.0.0",
-    "jpeg-js": "0.4.4",
-    "jsdom": "26.0.0",
     "micro-bmark": "0.4.1",
     "micro-should": "0.5.2",
-    "omggif": "1.0.10",
     "prettier": "3.5.3",
     "typescript": "5.8.3"
   },
@@ -48,9 +42,9 @@
     "build:release": "npx jsbt esbuild test/build",
     "lint": "prettier --check src",
     "format": "prettier --write src",
-    "test": "node test/index.js",
-    "test:bun": "bun test/index.js",
-    "test:deno": "deno --allow-env --allow-read test/index.js"
+    "test": "cd test; npm ci; node index.js",
+    "test:bun": "cd test; bun install; bun index.js",
+    "test:deno": "cd test; npm install; deno --allow-env --allow-read index.js"
   },
   "exports": {
     ".": {

@@ -1,7 +1,11 @@
 {
   "type": "module",
-  "browser": {
-    "crypto": false,
-    "./crypto": "./esm/cryptoBrowser.js"
+  "devDependencies": {
+    "@types/jsdom": "21.1.7",
+    "canvas": "3.1.0",
+    "global-jsdom": "26.0.0",
+    "jpeg-js": "0.4.4",
+    "jsdom": "26.0.0",
+    "omggif": "1.0.10"
   }
 }
