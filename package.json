@@ -24,9 +24,9 @@
   "types": "index.d.ts",
   "sideEffects": false,
   "devDependencies": {
-    "@paulmillr/jsbt": "0.3.3",
+    "@paulmillr/jsbt": "0.4.0",
     "micro-bmark": "0.4.1",
-    "micro-should": "0.5.2",
+    "micro-should": "0.5.3",
     "prettier": "3.5.3",
     "typescript": "5.8.3"
   },
