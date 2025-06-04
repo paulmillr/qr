@@ -50,7 +50,8 @@
     "format": "prettier --write src",
     "test": "cd test; npm ci; node --experimental-strip-types --no-warnings index.ts",
     "test:bun": "cd test; bun install; bun index.ts",
-    "test:deno": "cd test; npm install; deno --allow-env --allow-read index.ts"
+    "test:deno": "cd test; npm install; deno --allow-env --allow-read index.ts",
+    "test:node20": "cd test; npx tsc; node compiled/test/index.js"
   },
   "keywords": [
     "qr",

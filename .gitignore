@@ -11,3 +11,4 @@ coverage/
 /esm/*.d.ts.map
 /esm/abstract
 /abstract/
+/test/compiled
