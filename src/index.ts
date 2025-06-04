@@ -21,14 +21,14 @@ limitations under the License.
  * @module
  * @example
 ```js
-import encodeQR from '@paulmillr/qr';
+import encodeQR from 'qr';
 const txt = 'Hello world';
 const ascii = encodeQR(txt, 'ascii'); // Not all fonts are supported
 const terminalFriendly = encodeQR(txt, 'term'); // 2x larger, all fonts are OK
 const gifBytes = encodeQR(txt, 'gif'); // Uncompressed GIF
 const svgElement = encodeQR(txt, 'svg'); // SVG vector image element
 const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
-// import decodeQR from '@paulmillr/qr/decode';
+// import decodeQR from 'qr/decode.js';
 ```
  */
 

@@ -43,7 +43,7 @@ A standalone file [qr.js](https://github.com/paulmillr/qr/releases) is also avai
 ```ts
 import encodeQR from 'qr';
 
-// import decodeQR from 'qr/decode';
+// import decodeQR from 'qr/decode.js';
 // See separate README section for decoding.
 
 const txt = 'Hello world';
@@ -100,7 +100,7 @@ Decoding raw bitmap is still possible.
 
 ```js
 import encodeQR from 'qr';
-import decodeQR from 'qr/decode';
+import decodeQR from 'qr/decode.js';
 import { Bitmap } from 'qr';
 
 // Scale so it would be 100x100 instead of 25x25
@@ -136,7 +136,7 @@ function decodeWithExternal() {
 }
 
 // c) draw gif/svg to browser DOM canvas
-import { svgToPng } from 'qr/dom';
+import { svgToPng } from 'qr/dom.js';
 const png = svgToPng(encodeQR('Hello world', 'svg'), 512, 512);
 ```
 
@@ -196,7 +196,7 @@ Check out `dom.ts` for browser-related camera code that would make your apps sim
 ## Using with Kotlin
 
 ```kotlin
-@JsModule("@paulmillr/qr")
+@JsModule("qr")
 @JsNonModule
 external object Qr {
     @JsName("default")
@@ -238,23 +238,22 @@ Benchmarks measured with Apple M2 on MacOS 13 with node.js 19.
 
 ```
 ======== encode/ascii ========
-encode/paulmillr-qr x 1,794 ops/sec @ 557μs/op
-encode/qrcode-generator x 3,128 ops/sec @ 319μs/op ± 1.12% (min: 293μs, max: 3ms)
-encode/nuintun x 1,872 ops/sec @ 533μs/op
+encode/paulmillr x 2,995 ops/sec @ 333μs/op
+encode/qrcode-generator x 6,029 ops/sec @ 165μs/op ± 1.39% (min: 142μs, max: 2ms)
+encode/nuintun x 3,647 ops/sec @ 274μs/op
 ======== encode/gif ========
-encode/paulmillr-qr x 1,771 ops/sec @ 564μs/op
-encode/qrcode-generator x 1,773 ops/sec @ 563μs/op
-encode/nuintun x 1,883 ops/sec @ 530μs/op
+encode/paulmillr x 2,967 ops/sec @ 337μs/op
+encode/qrcode-generator x 3,486 ops/sec @ 286μs/op
+encode/nuintun x 3,643 ops/sec @ 274μs/op
 ======== encode: big ========
-encode/paulmillr-qr x 87 ops/sec @ 11ms/op
-encode/qrcode-generator x 124 ops/sec @ 8ms/op
-encode/nuintun x 143 ops/sec @ 6ms/op
+encode/paulmillr x 156 ops/sec @ 6ms/op
+encode/qrcode-generator x 200 ops/sec @ 4ms/op
+encode/nuintun x 223 ops/sec @ 4ms/op
 ======== decode ========
-decode/paulmillr-qr x 96 ops/sec @ 10ms/op ± 1.39% (min: 9ms, max: 32ms)
-decode/jsqr x 34 ops/sec @ 28ms/op
-decode/nuintun x 35 ops/sec @ 28ms/op
-decode/instascan x 79 ops/sec @ 12ms/op ± 6.73% (min: 9ms, max: 223ms)
-======== Decoding quality ========
+decode/paulmillr x 154 ops/sec @ 6ms/op ± 1.29% (min: 6ms, max: 18ms)
+decode/jsqr x 52 ops/sec @ 18ms/op
+decode/nuintun x 51 ops/sec @ 19ms/op
+decode/instascan x 158 ops/sec @ 6ms/op ± 9.06% (min: 3ms, max: 144ms)======== Decoding quality ========
 blurred(45):  paulmillr-qr=12 (26.66%) jsqr=13 (28.88%) nuintun=13 (28.88%) instascan=11 (24.44%)
 ```
 
