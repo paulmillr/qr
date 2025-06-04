@@ -6,7 +6,7 @@ Minimal 0-dep QR code generator & reader.
 - 🏞️ Encoding (generating) supports ASCII, term, gif and svg codes
 - 📷 Decoding (reading) supports camera feed input, files and non-browser environments
 - 🔍 Extensive tests ensure correctness: 100MB+ of vectors
-- 🪶 35KB for encoding + decoding, 18KB for encoding (1000 lines of code)
+- 🪶 14KB (gzipped) for encoding + decoding, 7KB for encoding
 
 Check out:
 

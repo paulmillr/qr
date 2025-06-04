@@ -8,3 +8,4 @@ jobs:
     uses: paulmillr/jsbt/.github/workflows/test-ts.yml@2318b9efe24831b4bd4cadf720c96f071c69c64d
     with:
       submodules: true
+      runs-on: 'ubuntu-24.04'
