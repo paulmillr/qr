@@ -1,8 +1,8 @@
 import { should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
 import { readdirSync, statSync } from 'node:fs';
-import readQR, { _tests } from '../esm/decode.js';
-import { DETECTION_PATH, readJPEG } from './utils.js';
+import readQR, { _tests } from '../src/decode.ts';
+import { DETECTION_PATH, readJPEG } from './utils.ts';
 
 function parseCoordinates(c) {
   const qrSize = 4 * 2;
@@ -417,7 +417,7 @@ for (const category of listFiles(DETECTION_PATH, true)) {
         // }
       }
     }
-    if (count === 0) return console.log('total: 0');
+    if (count === 0) return console.log('total: 0 for category', category);
     const p1 = percent(hadDecoded, count);
     const p2 = percent(currDecoded, count);
     const p3 = percent(currDecoded, hadDecoded);

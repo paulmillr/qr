@@ -1,7 +1,7 @@
 import { should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
-import encodeQR, { _tests } from '../esm/index.js';
-import { jsonGZ } from './utils.js';
+import encodeQR, { _tests } from '../src/index.ts';
+import { jsonGZ } from './utils.ts';
 const TEST_CASES = jsonGZ('vectors/small-vectors.json.gz');
 
 should('qr v1', () => {

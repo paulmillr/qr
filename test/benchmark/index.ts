@@ -1,17 +1,17 @@
-import { deepStrictEqual } from 'node:assert';
-import { run, mark } from 'micro-bmark';
 import * as jpeg from 'jpeg-js';
+import { mark, run } from 'micro-bmark';
+import { deepStrictEqual } from 'node:assert';
 import * as fs from 'node:fs';
-import encodeQR from '../esm/index.js';
-import decodeQR from '../esm/decode.js';
+import decodeQR from '../../src/decode.ts';
+import encodeQR from '../../src/index.ts';
 // Other libraries
-import * as qrcodeGenerator from 'qrcode-generator';
-import jsqr from 'jsqr';
 import * as nuintun from '@nuintun/qrcode';
 import * as instascan from 'instascan/src/zxing.js';
+import jsqr from 'jsqr';
+import * as qrcodeGenerator from 'qrcode-generator';
 
 const decodeExp = 'https://www.surveymonkey.com/s/TheClubatLAS_T3';
-const decodeJPG = jpeg.decode(fs.readFileSync('../test/vectors/boofcv-v3/detection/blurred/image007.jpg'));
+const decodeJPG = jpeg.decode(fs.readFileSync('../vectors/boofcv-v3/detection/blurred/image007.jpg'));
 
 // Compared to other JS libraries:
 // - Don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser

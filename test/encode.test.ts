@@ -1,6 +1,6 @@
 import { should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
-import { _tests } from '../esm/index.js';
+import { _tests } from '../src/index.ts';
 
 should('detectType', () => {
   const VECTORS = [

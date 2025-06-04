@@ -1,7 +1,7 @@
 import { should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
 import { GifReader } from 'omggif';
-import encodeQR, { _tests } from '../esm/index.js';
+import encodeQR, { _tests } from '../src/index.ts';
 const { Bitmap } = _tests;
 
 const strip = (str) => str.replace(/^\n+/g, '').replace(/\n+$/g, '');
@@ -335,7 +335,7 @@ function GIFtoBitmap(gif) {
   }
   return res;
 }
-/* 
+/*
 What's the best way to test exporting to SVG/GIF/PNG? We can do:
 
     img.src = "data:image/svg+xml;base64,"+btoa(svgContent);

@@ -1,8 +1,8 @@
 import globalJsdom from 'global-jsdom';
 import { should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
-import { getSize, svgToPng } from '../esm/dom.js';
-import { encodeQR } from '../esm/index.js';
+import { getSize, svgToPng } from '../src/dom.ts';
+import { encodeQR } from '../src/index.ts';
 
 globalJsdom(undefined, { resources: 'usable' });
 
