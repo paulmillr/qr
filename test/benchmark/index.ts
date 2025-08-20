@@ -1,5 +1,5 @@
 import * as jpeg from 'jpeg-js';
-import { mark, run } from 'micro-bmark';
+import { mark, run } from '@paulmillr/jsbt/bench.js';
 import { deepStrictEqual } from 'node:assert';
 import * as fs from 'node:fs';
 import decodeQR from '../../src/decode.ts';

@@ -1,4 +1,4 @@
-import { should } from 'micro-should';
+import { should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual } from 'node:assert';
 import encodeQR, { _tests } from '../src/index.ts';
 import { jsonGZ } from './utils.ts';

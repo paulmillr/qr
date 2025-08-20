@@ -1,4 +1,4 @@
-import { should } from 'micro-should';
+import { should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual } from 'node:assert';
 import { readdirSync, statSync } from 'node:fs';
 import readQR, { _tests } from '../src/decode.ts';
