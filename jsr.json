@@ -1,6 +1,6 @@
 {
   "name": "@paulmillr/qr",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "exports": {
     ".": "./src/index.ts",
     "./decode.js": "./src/decode.ts",
