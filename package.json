@@ -35,6 +35,11 @@
     "test:deno": "cd test; npm install; deno --allow-env --allow-read index.ts",
     "test:node20": "cd test; npx tsc; cd compiled/test; npm install; node index.js"
   },
+  "exports": {
+    ".": "./index.js",
+    "./decode.js": "./decode.js",
+    "./dom.js": "./dom.js"
+  },
   "engines": {
     "node": ">= 20.19.0"
   },
