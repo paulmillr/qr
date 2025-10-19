@@ -62,6 +62,7 @@ export type QRCanvasOpts = {
   overlaySideColor: string;
   overlayTimeout: number; // how must time from last detect until hide overlay stuff
   cropToSquare: boolean; // crop image to square
+  textDecoder?: (bytes: Uint8Array) => string;
 };
 
 export type QRCanvasElements = {
@@ -182,7 +183,10 @@ export class QRCanvas {
     const { context } = this.main;
     context.drawImage(image, 0, 0, width, height);
     const data = context.getImageData(0, 0, width, height);
-    const options: DecodeOpts = { cropToSquare: this.opts.cropToSquare };
+    const options: DecodeOpts = {
+      cropToSquare: this.opts.cropToSquare,
+      textDecoder: this.opts.textDecoder,
+    };
     if (this.bitmap) options.imageOnBitmap = (img) => this.drawBitmap(img);
     if (this.overlay) options.pointsOnDetect = (points) => this.drawOverlay(points);
     if (this.resultQR) options.imageOnResult = (img) => this.drawResultQr(img);
