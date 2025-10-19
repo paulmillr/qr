@@ -738,8 +738,11 @@ function parseInfo(b: Bitmap) {
 // Global symbols in both browsers and Node.js since v11
 // See https://github.com/microsoft/TypeScript/issues/31535
 declare const TextDecoder: any;
+function bytesToUtf8(bytes: Uint8Array): string {
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
 
-function decodeBitmap(b: Bitmap): string {
+function decodeBitmap(b: Bitmap, decoder: (bytes: Uint8Array) => string = bytesToUtf8): string {
   const size = b.height;
   if (size < 21 || (size & 0b11) !== 1 || size !== b.width)
     throw new Error(`decode: invalid size=${size}`);
@@ -815,7 +818,7 @@ function decodeBitmap(b: Bitmap): string {
     } else if (mode === 'byte') {
       let utf8 = [];
       for (let i = 0; i < count; i++) utf8.push(Number(`0b${readBits(8)}`));
-      res += new TextDecoder().decode(new Uint8Array(utf8));
+      res += decoder(new Uint8Array(utf8));
     } else throw new Error(`Unknown mode=${mode}`);
   }
   return res;
@@ -823,6 +826,7 @@ function decodeBitmap(b: Bitmap): string {
 
 export type DecodeOpts = {
   cropToSquare?: boolean;
+  textDecoder?: (bytes: Uint8Array) => string;
   pointsOnDetect?: (points: FinderPoints) => void;
   imageOnBitmap?: (img: Image) => void;
   imageOnDetect?: (img: Image) => void;
@@ -876,7 +880,7 @@ export function decodeQR(img: Image, opts: DecodeOpts = {}): string {
     opts.pointsOnDetect(p);
   }
   if (opts.imageOnDetect) opts.imageOnDetect(bits.toImage());
-  const res = decodeBitmap(bits);
+  const res = decodeBitmap(bits, opts.textDecoder);
   if (opts.imageOnResult) opts.imageOnResult(bits.toImage());
   return res;
 }
