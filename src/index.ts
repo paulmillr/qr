@@ -901,7 +901,13 @@ export function utf8ToBytes(str: string): Uint8Array {
   return new Uint8Array(new TextEncoder().encode(str)); // https://bugzil.la/1681809
 }
 
-function encode(ver: Version, ecc: ErrorCorrection, data: string, type: EncodingType): Uint8Array {
+function encode(
+  ver: Version,
+  ecc: ErrorCorrection,
+  data: string,
+  type: EncodingType,
+  encoder: (value: string) => Uint8Array = utf8ToBytes
+): Uint8Array {
   let encoded = '';
   let dataLen = data.length;
   if (type === 'numeric') {
@@ -919,7 +925,7 @@ function encode(ver: Version, ecc: ErrorCorrection, data: string, type: Encoding
     for (let i = 0; i < n - 1; i += 2) encoded += bin(t[i] * 45 + t[i + 1], 11);
     if (n % 2 == 1) encoded += bin(t[n - 1], 6); // pad if odd number of chars
   } else if (type === 'byte') {
-    const utf8 = utf8ToBytes(data);
+    const utf8 = encoder(data);
     dataLen = utf8.length;
     encoded = Array.from(utf8)
       .map((i) => bin(i, 8))
@@ -1041,6 +1047,7 @@ function drawQRBest(ver: Version, ecc: ErrorCorrection, data: Uint8Array, maskId
 export type QrOpts = {
   ecc?: ErrorCorrection | undefined;
   encoding?: EncodingType | undefined;
+  textEncoder?: (text: string) => Uint8Array;
   version?: Version | undefined;
   mask?: number | undefined;
   border?: number | undefined;
@@ -1112,13 +1119,13 @@ export function encodeQR(text: string, output: Output = 'raw', opts: QrOpts & Sv
     err = new Error('Unknown error');
   if (ver !== undefined) {
     validateVersion(ver);
-    data = encode(ver, ecc, text, encoding);
+    data = encode(ver, ecc, text, encoding, opts.textEncoder);
   } else {
     // If no version is provided, try to find smallest one which fits
     // Currently just scans all version, can be significantly speedup if needed
     for (let i = 1; i <= 40; i++) {
       try {
-        data = encode(i, ecc, text, encoding);
+        data = encode(i, ecc, text, encoding, opts.textEncoder);
         ver = i;
         break;
       } catch (e) {

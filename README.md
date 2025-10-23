@@ -65,6 +65,7 @@ const larger = encodeQR(txt, 'gif', { scale: 4 });
 // type QrOpts = {
 //   ecc?: 'low' | 'medium' | 'quartile' | 'high';
 //   encoding?: 'numeric' | 'alphanumeric' | 'byte' | 'kanji' | 'eci';
+//   textEncoder?: (text: string) => Uint8Array;
 //   version?: number; // 1..40, QR code version
 //   mask?: number; // 0..7, mask number
 //   border?: number; // Border size, default 2.
