@@ -67,17 +67,23 @@ function fillArr<T>(length: number, val: T): T[] {
  * @param blocks [[1, 2, 3], [4, 5, 6]]
  * @returns [1, 4, 2, 5, 3, 6]
  */
-function interleaveBytes(...blocks: Uint8Array[]): Uint8Array {
-  let len = 0;
-  for (const b of blocks) len = Math.max(len, b.length);
-  const res = [];
-  for (let i = 0; i < len; i++) {
-    for (const b of blocks) {
-      if (i >= b.length) continue; // outside of block, skip
-      res.push(b[i]);
-    }
+function interleaveBytes(blocks: Uint8Array[]): Uint8Array {
+  let maxLen = 0;
+  let totalLen = 0;
+  blocks.forEach((block) => {
+    maxLen = Math.max(maxLen, block.length);
+    totalLen += block.length;
+  });
+
+  const result = new Uint8Array(totalLen);
+  let idx = 0;
+  for (let i = 0; i < maxLen; i++) {
+    blocks.forEach((block) => {
+      if (i < block.length) result[idx++] = block[i];
+    });
   }
-  return new Uint8Array(res);
+
+  return result;
 }
 
 function includesAt<T>(lst: T[], pattern: T[], index: number): boolean {
@@ -753,8 +759,8 @@ function interleave(ver: Version, ecc: ErrorCorrection): Coder<Uint8Array, Uint8
         eccBlocks.push(rs.encode(bytes.subarray(0, len)));
         bytes = bytes.subarray(len);
       }
-      const resBlocks = interleaveBytes(...blocks);
-      const resECC = interleaveBytes(...eccBlocks);
+      const resBlocks = interleaveBytes(blocks);
+      const resECC = interleaveBytes(eccBlocks);
       const res = new Uint8Array(resBlocks.length + resECC.length);
       res.set(resBlocks);
       res.set(resECC, resBlocks.length);
