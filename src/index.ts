@@ -32,6 +32,13 @@ const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
 ```
  */
 
+const R1_RUN_LENGTH_THRESHOLD = 5;
+const R2_BLOCK_PENALTY = 3;
+const R3_FINDER_PATTERN_LENGTH = 11;
+const R3_FINDER_PENALTY = 40;
+const R4_BALANCE_STEP_PERCENT = 5;
+const R4_BALANCE_STEP_POINTS = 10;
+
 // We do not use newline escape code directly in strings because it's not parser-friendly
 const chCodes = { newline: 10, reset: 27 };
 
@@ -86,11 +93,6 @@ function interleaveBytes(blocks: Uint8Array[]): Uint8Array {
   return result;
 }
 
-function includesAt<T>(lst: T[], pattern: T[], index: number): boolean {
-  if (index < 0 || index + pattern.length > lst.length) return false;
-  for (let i = 0; i < pattern.length; i++) if (pattern[i] !== lst[index + i]) return false;
-  return true;
-}
 // Optimize for minimal score/penalty
 function best<T>(): {
   add(score: number, value: T): void;
@@ -979,64 +981,189 @@ function drawQR(
   return b;
 }
 
-function penalty(bm: Bitmap): number {
-  const inverse = bm.inverse();
-  // Adjacent modules in row/column in same | No. of modules = (5 + i) color
-  const sameColor = (row: DrawValue[]) => {
-    let res = 0;
-    for (let i = 0, same = 1, last = undefined; i < row.length; i++) {
-      if (last === row[i]) {
-        same++;
-        if (i !== row.length - 1) continue; // handle last element
-      }
-      if (same >= 5) res += 3 + (same - 5);
-      last = row[i];
-      same = 1;
+function calculateRowRunPenalty(rowBits: readonly boolean[]): number {
+  const moduleCount = rowBits.length;
+  if (moduleCount <= 1) return 0;
+
+  let penalty = 0;
+  let runLength = 1;
+  let previousColor = rowBits[0];
+
+  for (let i = 1; i < moduleCount; i++) {
+    const currentColor = rowBits[i];
+    if (currentColor === previousColor) {
+      runLength++;
+    } else {
+      if (runLength >= R1_RUN_LENGTH_THRESHOLD) penalty += runLength - 2;
+      runLength = 1;
+      previousColor = currentColor;
     }
-    return res;
-  };
-  let adjacent = 0;
-  bm.data.forEach((row) => (adjacent += sameColor(row)));
-  inverse.data.forEach((column) => (adjacent += sameColor(column)));
-  // Block of modules in same color (Block size = 2x2)
-  let box = 0;
-  let b = bm.data;
-  const lastW = bm.width - 1;
-  const lastH = bm.height - 1;
-  for (let x = 0; x < lastW; x++) {
-    for (let y = 0; y < lastH; y++) {
-      const x1 = x + 1;
-      const y1 = y + 1;
-      if (b[x][y] === b[x1][y] && b[x1][y] === b[x][y1] && b[x1][y] === b[x1][y1]) {
-        box += 3;
+  }
+
+  if (runLength >= R1_RUN_LENGTH_THRESHOLD) penalty += runLength - 2;
+
+  return penalty;
+}
+
+function calculateColumnRunPenalty(
+  bitmap: readonly boolean[][],
+  columnIndex: number,
+  columnHeight: number
+): number {
+  if (columnHeight <= 1) return 0;
+
+  let penalty = 0;
+  let runLength = 1;
+  let previousColor = bitmap[0][columnIndex];
+
+  for (let y = 1; y < columnHeight; y++) {
+    const currentColor = bitmap[y][columnIndex];
+    if (currentColor === previousColor) {
+      runLength++;
+    } else {
+      if (runLength >= R1_RUN_LENGTH_THRESHOLD) penalty += runLength - 2;
+      runLength = 1;
+      previousColor = currentColor;
+    }
+  }
+
+  if (runLength >= R1_RUN_LENGTH_THRESHOLD) penalty += runLength - 2;
+
+  return penalty;
+}
+
+function calculateRowFinderPenalty(rowBits: readonly boolean[]): number {
+  const rowLength = rowBits.length;
+  if (rowLength < R3_FINDER_PATTERN_LENGTH) return 0;
+
+  let penalty = 0;
+  const lastStart = rowLength - R3_FINDER_PATTERN_LENGTH;
+
+  for (let i = 0; i <= lastStart; i++) {
+    // Case A: L L L L + 1 0 1 1 1 0 1
+    const light4ThenFinder7 =
+      !rowBits[i] &&
+      !rowBits[i + 1] &&
+      !rowBits[i + 2] &&
+      !rowBits[i + 3] &&
+      rowBits[i + 4] &&
+      !rowBits[i + 5] &&
+      rowBits[i + 6] &&
+      rowBits[i + 7] &&
+      rowBits[i + 8] &&
+      !rowBits[i + 9] &&
+      rowBits[i + 10];
+
+    // Case B: 1 0 1 1 1 0 1 + L L L L
+    const finder7ThenLight4 =
+      rowBits[i] &&
+      !rowBits[i + 1] &&
+      rowBits[i + 2] &&
+      rowBits[i + 3] &&
+      rowBits[i + 4] &&
+      !rowBits[i + 5] &&
+      rowBits[i + 6] &&
+      !rowBits[i + 7] &&
+      !rowBits[i + 8] &&
+      !rowBits[i + 9] &&
+      !rowBits[i + 10];
+
+    if (light4ThenFinder7 || finder7ThenLight4) penalty += R3_FINDER_PENALTY;
+  }
+  return penalty;
+}
+
+function calculateColumnFinderPenalty(
+  matrix: readonly boolean[][],
+  rowIndex: number,
+  width: number
+): number {
+  if (width < R3_FINDER_PATTERN_LENGTH) return 0;
+
+  let penalty = 0;
+  const y = rowIndex;
+  const lastStart = width - R3_FINDER_PATTERN_LENGTH;
+
+  for (let x = 0; x <= lastStart; x++) {
+    // Case A: L L L L + 1 0 1 1 1 0 1
+    const light4ThenFinder7 =
+      !matrix[x][y] &&
+      !matrix[x + 1][y] &&
+      !matrix[x + 2][y] &&
+      !matrix[x + 3][y] &&
+      matrix[x + 4][y] &&
+      !matrix[x + 5][y] &&
+      matrix[x + 6][y] &&
+      matrix[x + 7][y] &&
+      matrix[x + 8][y] &&
+      !matrix[x + 9][y] &&
+      matrix[x + 10][y];
+
+    // Case B: 1 0 1 1 1 0 1 + L L L L
+    const finder7ThenLight4 =
+      matrix[x][y] &&
+      !matrix[x + 1][y] &&
+      matrix[x + 2][y] &&
+      matrix[x + 3][y] &&
+      matrix[x + 4][y] &&
+      !matrix[x + 5][y] &&
+      matrix[x + 6][y] &&
+      !matrix[x + 7][y] &&
+      !matrix[x + 8][y] &&
+      !matrix[x + 9][y] &&
+      !matrix[x + 10][y];
+
+    if (light4ThenFinder7 || finder7ThenLight4) penalty += R3_FINDER_PENALTY;
+  }
+  return penalty;
+}
+
+function penalty(bitmap: Bitmap): number {
+  const matrix = bitmap.data as boolean[][];
+  const width = bitmap.width | 0;
+  const height = bitmap.height | 0;
+
+  if (width === 0 || height === 0) return 0;
+
+  // Rule 1: same-color runs
+  let runPenalty = 0;
+  for (let x = 0; x < width; x++) runPenalty += calculateRowRunPenalty(matrix[x]);
+  for (let y = 0; y < height; y++) runPenalty += calculateColumnRunPenalty(matrix, y, width);
+
+  // Rule 2: 2×2 blocks of the same color
+  let blockPenalty = 0;
+  const lastCol = width - 1;
+  const lastRow = height - 1;
+  for (let x = 0; x < lastCol; x++) {
+    const col = matrix[x];
+    const nextCol = matrix[x + 1];
+    for (let y = 0; y < lastRow; y++) {
+      const cell = col[y];
+      if (cell === nextCol[y] && cell === col[y + 1] && cell === nextCol[y + 1]) {
+        blockPenalty += R2_BLOCK_PENALTY;
       }
     }
   }
-  // 1:1:3:1:1 ratio (dark:light:dark:light:dark) pattern in row/column, preceded or followed by light area 4 modules wide
-  const finderPattern = (row: DrawValue[]) => {
-    const finderPattern = [true, false, true, true, true, false, true]; // dark:light:dark:light:dark
-    const lightPattern = [false, false, false, false]; // light area 4 modules wide
-    const p1 = [...finderPattern, ...lightPattern];
-    const p2 = [...lightPattern, ...finderPattern];
-    let res = 0;
-    for (let i = 0; i < row.length; i++) {
-      if (includesAt(row, p1, i)) res += 40;
-      if (includesAt(row, p2, i)) res += 40;
-    }
-    return res;
-  };
-  let finder = 0;
-  for (const row of bm.data) finder += finderPattern(row);
-  for (const column of inverse.data) finder += finderPattern(column);
-  // Proportion of dark modules in entire symbol
-  // Add 10 points to a deviation of 5% increment or decrement in the proportion
-  // ratio of dark module from the referential 50%
-  let darkPixels = 0;
-  bm.rectRead(0, Infinity, (_c, val) => (darkPixels += val ? 1 : 0));
-  const darkPercent = (darkPixels / (bm.height * bm.width)) * 100;
-  const dark = 10 * Math.floor(Math.abs(darkPercent - 50) / 5);
-  return adjacent + box + finder + dark;
+
+  // Rule 3: finder-like 1:1:3:1:1 with 4-light padding
+  let finderPenalty = 0;
+  for (let x = 0; x < width; x++) finderPenalty += calculateRowFinderPenalty(matrix[x]);
+  for (let y = 0; y < height; y++) finderPenalty += calculateColumnFinderPenalty(matrix, y, width);
+
+  // Rule 4: dark-module balance vs 50%
+  let darkCount = 0;
+  for (let x = 0; x < width; x++) {
+    const col = matrix[x];
+    for (let y = 0; y < height; y++) if (col[y]) darkCount++;
+  }
+  const moduleCount = width * height;
+  const darkPercent = (darkCount * 100) / moduleCount;
+  const deviation = Math.abs(darkPercent - 50);
+  const balancePenalty = R4_BALANCE_STEP_POINTS * Math.floor(deviation / R4_BALANCE_STEP_PERCENT);
+
+  return runPenalty + blockPenalty + finderPenalty + balancePenalty;
 }
+
 // Selects best mask according to penalty, if no mask is provided
 function drawQRBest(ver: Version, ecc: ErrorCorrection, data: Uint8Array, maskIdx?: Mask) {
   if (maskIdx === undefined) {
