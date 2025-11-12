@@ -70,17 +70,17 @@ function fillArr<T>(length: number, val: T): T[] {
 function interleaveBytes(blocks: Uint8Array[]): Uint8Array {
   let maxLen = 0;
   let totalLen = 0;
-  blocks.forEach((block) => {
+  for (const block of blocks) {
     maxLen = Math.max(maxLen, block.length);
     totalLen += block.length;
-  });
+  }
 
   const result = new Uint8Array(totalLen);
   let idx = 0;
   for (let i = 0; i < maxLen; i++) {
-    blocks.forEach((block) => {
+    for (const block of blocks) {
       if (i < block.length) result[idx++] = block[i];
-    });
+    }
   }
 
   return result;
