@@ -15,8 +15,8 @@
     "@nuintun/qrcode": "3.3.0",
     "@zxing/library": "0.19.2",
     "instascan": "1.0.0",
+    "jpeg-js": "0.4.4",
     "jsqr": "1.4.0",
-    "micro-bmark": "0.3.0",
     "qrcode-generator": "1.4.4"
   }
 }
