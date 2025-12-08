@@ -3,7 +3,7 @@
 Minimal 0-dep QR code generator & reader.
 
 - 🔒 Auditable, 0-dependency
-- 🏞️ Encoding (generating) supports ASCII, term, gif and svg codes
+- 🏞️ Encoding (generating) supports ASCII, term, gif, svg and png codes
 - 📷 Decoding (reading) supports camera feed input, files and non-browser environments
 - 🔍 Extensive tests ensure correctness: 100MB+ of vectors
 - 🪶 14KB (gzipped) for encoding + decoding, 7KB for encoding
@@ -52,6 +52,8 @@ const terminalFriendly = encodeQR(txt, 'term'); // 2x larger, all fonts are OK
 const gifBytes = encodeQR(txt, 'gif'); // Uncompressed GIF
 const svgElement = encodeQR(txt, 'svg'); // SVG vector image element
 const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
+// import { svgToPng } from 'qr/dom.js';
+// const png = svgToPng(svgElement, 512, 512); // .png, using DOM
 
 // Options
 // Custom error correction level
@@ -135,10 +137,6 @@ function decodeWithExternal() {
   const decoded = decodeQR(parseGIF(gifBytes));
   console.log('decoded(gif)', decoded);
 }
-
-// c) draw gif/svg to browser DOM canvas
-import { svgToPng } from 'qr/dom.js';
-const png = svgToPng(encodeQR('Hello world', 'svg'), 512, 512);
 ```
 
 ### Decoding options
