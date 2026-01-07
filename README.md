@@ -7,7 +7,7 @@ Minimal 0-dependency QR code generator & reader.
 - 📷 Decoding (reading) supports camera feed input, files and non-browser environments
 - 🏎 Fast: faster than all JS implementations
 - 🔍 Extensive tests ensure correctness: 100MB+ of vectors
-- 🪶 14KB (gzipped) for encoding + decoding, 7KB for encoding
+- 🪶 16KB (gzipped) for encoding + decoding, 9KB for encoding
 
 Check out:
 
