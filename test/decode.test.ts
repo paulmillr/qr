@@ -1,6 +1,7 @@
 import { should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual } from 'node:assert';
 import { readdirSync, statSync } from 'node:fs';
+import { join as pjoin } from 'node:path';
 import readQR, { _tests } from '../src/decode.ts';
 import { DETECTION_PATH, readJPEG } from './utils.ts';
 
@@ -191,6 +192,7 @@ const DECODED = {
     'image025.jpg': ['正宗铁观音茶叶 乐品乐茶 \nhttp://detail.tmall.com/item.htm?id=13996190738'],
     'image027.jpg': ['IPN:J68574-001 D/C:2017/10/13'],
     'image028.jpg': ['IPN:J68574-001 D/C:2017/10/13'],
+    'image030.jpg': ['IPN:J68574-001 D/C:2017/10/13'],
     'image031.jpg': ['IPN:J68574-001 D/C:2017/10/13'],
     'image033.jpg': ['IPN:J68574-001 D/C:2017/10/13'],
     'image038.jpg': ['IPN:J68574-001 D/C:2017/10/13'],
@@ -223,6 +225,9 @@ const DECODED = {
     'image027.jpg': ['http://uqr.me/acgovdehvehicles'],
     'image029.jpg': ['https://goo.gl/forms/ofwmcoJn1qN6HPb72'],
     'image040.jpg': [
+      'http://www.youtube.com/watch?v=7qa6Bho4OyM&feature=share&list=PLk13TE2t32tgRCVo0q8tTB1CyZyMDQCNH&index=10',
+    ],
+    'image043.jpg': [
       'http://www.youtube.com/watch?v=7qa6Bho4OyM&feature=share&list=PLk13TE2t32tgRCVo0q8tTB1CyZyMDQCNH&index=10',
     ],
     'image047.jpg': [
@@ -261,6 +266,8 @@ const DECODED = {
     'image021.jpg': ['http://www.teagoetz.com/'],
     'image022.jpg': ['http://www.teagoetz.com/'],
     'image023.jpg': ['http://www.teagoetz.com/'],
+    'image024.jpg': ['https://mobile-now.us/?l=10043659'],
+    'image025.jpg': ['http://onramp.ehi.com/HYUN/ACNT/4SE/US/?v=KMHCT4AE3GU107709'],
     'image026.jpg': ['0555506635839349055557'],
     'image027.jpg': ['0555506635839349055557'],
     'image029.jpg': ['0555506635839349055557'],
@@ -370,8 +377,6 @@ for (const category of listFiles(DETECTION_PATH, true)) {
         'curved/image022.jpg',
         'curved/image049.jpg',
         'glare/image050.jpg',
-        'high_version/image031.jpg',
-        'high_version/image032.jpg',
         'nominal/image015.jpg',
         'nominal/image020.jpg',
         'nominal/image021.jpg',
@@ -399,7 +404,7 @@ for (const category of listFiles(DETECTION_PATH, true)) {
       let decoded = DECODED[category][f];
       if (decoded !== undefined) hadDecoded++;
       // Skip files for which we don't have decoded information
-      if (decoded === undefined) continue;
+      //if (decoded === undefined) continue;
       // console.log('Decoding', p.replace(DIR, ''));
       let res;
       try {
@@ -407,7 +412,10 @@ for (const category of listFiles(DETECTION_PATH, true)) {
       } catch (e) {
         //console.log('TEST ERR', e);
       }
-      if (res !== undefined) currDecoded++;
+      if (res !== undefined) {
+        // if (decoded === undefined) console.log('NEW DECODED', category, f, [res]);
+        currDecoded++;
+      }
       if (decoded !== undefined) {
         deepStrictEqual(decoded.includes(res), true, p);
         // try {
@@ -421,14 +429,29 @@ for (const category of listFiles(DETECTION_PATH, true)) {
     const p1 = percent(hadDecoded, count);
     const p2 = percent(currDecoded, count);
     const p3 = percent(currDecoded, hadDecoded);
-    //     console.log(
-    // `${category}
+    // console.log(
+    //   `${category}
     //   total: ${count}
     //   decoded before: ${hadDecoded} (${p1} of total)
     //   decoded now: ${currDecoded} (${p2} of total, ${p3} of decoded before)`
-    //     );
+    // );
   });
 }
+should('gh-28 (invert)', () => {
+  const jpg = readJPEG(pjoin('..', 'issues', 'invert.jpg'));
+  const res = readQR(jpg);
+  deepStrictEqual(res, 'https://patreon.com/reactiive');
+});
+
+should('gh-28 (eci)', () => {
+  // From: https://www.barcodefaq.com/2d/eci/
+  const jpg = readJPEG(pjoin('..', 'issues', 'eci.jpg'));
+  const res = readQR(jpg);
+  deepStrictEqual(
+    res,
+    'Latin1\t®ÄËÖ¶|\rCyrillic\tфДШлЮЯЩ\rGreek\tΣAβΔΦΩ\rThai\tโก๛ณ๗ฟ\rShiftJIS\t｢ﾓﾄｽｦﾊﾋﾌﾍﾎﾏ｣\rArabic\tلخأضخک\rUTF-8\t條碼字體\rBig5\t圖常用字次\rLatin1End'
+  );
+});
 
 // should.only('DEBUG', () => {
 //   //const f = 'detection/high_version/image031.jpg';

@@ -87,7 +87,7 @@ XXXXX`,
   );
   // Inverse
   verifyDebug(
-    b.inverse(),
+    b.transpose(),
     `
  X X
  X X
@@ -108,7 +108,7 @@ X
     'rect diagonal'
   );
   verifyDebug(
-    b.inverse(),
+    b.transpose(),
     `
 X   
  X  

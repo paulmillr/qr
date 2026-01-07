@@ -32,13 +32,6 @@ const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
 ```
  */
 
-const R1_RUN_LENGTH_THRESHOLD = 5;
-const R2_BLOCK_PENALTY = 3;
-const R3_FINDER_PATTERN_LENGTH = 11;
-const R3_FINDER_PENALTY = 40;
-const R4_BALANCE_STEP_PERCENT = 5;
-const R4_BALANCE_STEP_POINTS = 10;
-
 // We do not use newline escape code directly in strings because it's not parser-friendly
 const chCodes = { newline: 10, reset: 27 };
 
@@ -67,6 +60,12 @@ function mod(a: number, b: number): number {
 
 function fillArr<T>(length: number, val: T): T[] {
   return new Array(length).fill(val);
+}
+
+function popcnt(n: number): number {
+  n = n - ((n >>> 1) & 0x55555555);
+  n = (n & 0x33333333) + ((n >>> 2) & 0x33333333);
+  return (((n + (n >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
 }
 
 /**
@@ -142,6 +141,36 @@ function alphabet(
   };
 }
 
+// Transpose 32x32 bit matrix in-place
+// a[0..31] are 32 rows of 32 bits each; after transpose they become 32 columns.
+function transpose32(a: Uint32Array) {
+  if (a.length !== 32) throw new Error('expects 32 element matrix');
+  const masks = [0x55555555, 0x33333333, 0x0f0f0f0f, 0x00ff00ff, 0x0000ffff] as const;
+  // Hello again, FFT
+  for (let stage = 0; stage < 5; stage++) {
+    const m = masks[stage] >>> 0;
+    const s = 1 << stage; // 1,2,4,8,16
+    const step = s << 1; // 2,4,8,16,32
+    for (let i = 0; i < 32; i += step) {
+      for (let k = 0; k < s; k++) {
+        const i0 = i + k;
+        const i1 = i0 + s;
+        const x = a[i0] >>> 0;
+        const y = a[i1] >>> 0;
+        const t = ((x >>> s) ^ y) & m;
+        a[i0] = (x ^ (t << s)) >>> 0;
+        a[i1] = (y ^ t) >>> 0;
+      }
+    }
+  }
+}
+const bitMask = (x: number): number => (1 << (x & 31)) >>> 0;
+const rangeMask = (shift: number, len: number): number => {
+  // len in [0..32], shift in [0..31]
+  if (len === 0) return 0;
+  if (len === 32) return 0xffffffff;
+  return (((1 << len) - 1) << shift) >>> 0;
+};
 /*
 Basic bitmap structure for two colors (black & white) small images.
 - undefined is used as a marker whether cell was written or not
@@ -185,8 +214,8 @@ export class Bitmap {
     s = s.replace(/^\n+/g, '').replace(/\n+$/g, '');
     const lines = s.split(String.fromCharCode(chCodes.newline));
     const height = lines.length;
-    const data = new Array(height);
     let width: number | undefined;
+    const rows: DrawValue[][] = [];
     for (const line of lines) {
       const row = line.split('').map((i) => {
         if (i === 'X') return true;
@@ -194,34 +223,53 @@ export class Bitmap {
         if (i === '?') return undefined;
         throw new Error(`Bitmap.fromString: unknown symbol=${i}`);
       });
-      if (width && row.length !== width)
+      if (width !== undefined && row.length !== width)
         throw new Error(`Bitmap.fromString different row sizes: width=${width} cur=${row.length}`);
       width = row.length;
-      data.push(row);
+      rows.push(row);
     }
-    if (!width) width = 0;
-    return new Bitmap({ height, width }, data);
+    if (width === undefined) width = 0;
+    return new Bitmap({ height, width }, rows);
   }
-
-  data: DrawValue[][];
+  // Two bitsets:
+  // defined=0 -> undefined
+  // defined=1,value=0 -> false
+  // defined=1,value=1 -> true
+  private defined: Uint32Array;
+  private value: Uint32Array;
+  private tailMask: number;
+  private words: number;
+  private fullWords: number;
   height: number;
   width: number;
   constructor(size: Size | number, data?: DrawValue[][]) {
     const { height, width } = Bitmap.size(size);
-    this.data = data || Array.from({ length: height }, () => fillArr(width, undefined));
     this.height = height;
     this.width = width;
+    this.tailMask = rangeMask(0, width & 31 || 32);
+    this.words = Math.ceil(width / 32) | 0;
+    this.fullWords = Math.floor(width / 32) | 0;
+    this.value = new Uint32Array(this.words * height);
+    this.defined = new Uint32Array(this.value.length);
+    if (data) {
+      // accept same semantics as old version
+      if (data.length !== height)
+        throw new Error(`Bitmap: data height mismatch: exp=${height} got=${data.length}`);
+      for (let y = 0; y < height; y++) {
+        const row = data[y];
+        if (!row || row.length !== width)
+          throw new Error(`Bitmap: data width mismatch at y=${y}: exp=${width} got=${row?.length}`);
+        for (let x = 0; x < width; x++) this.set(x, y, row[x]);
+      }
+    }
   }
   point(p: Point): DrawValue {
-    return this.data[p.y][p.x];
+    return this.get(p.x, p.y);
   }
   isInside(p: Point): boolean {
     return 0 <= p.x && p.x < this.width && 0 <= p.y && p.y < this.height;
   }
-  size(offset?: Point | number): {
-    height: number;
-    width: number;
-  } {
+  size(offset?: Point | number): { height: number; width: number } {
     if (!offset) return { height: this.height, width: this.width };
     const { x, y } = this.xy(offset);
     return { height: this.height - y, width: this.width - x };
@@ -235,27 +283,113 @@ export class Bitmap {
     c.y = mod(c.y, this.height);
     return c;
   }
-  // Basically every operation can be represented as rect
-  rect(c: Point | number, size: Size | number, value: DrawFn): this {
-    const { x, y } = this.xy(c);
-    const { height, width } = Bitmap.size(size, this.size({ x, y }));
+  /**
+   * Return pixel bit index
+   */
+  private wordIndex(x: number, y: number): number {
+    return y * this.words + (x >>> 5);
+  }
+  private bitIndex(x: number, y: number) {
+    return { word: this.wordIndex(x, y), bit: x & 31 };
+  }
+  isDefined(x: number, y: number): boolean {
+    const wi = this.wordIndex(x, y);
+    const m = bitMask(x);
+    return (this.defined[wi] & m) !== 0;
+  }
+  get(x: number, y: number): boolean {
+    const wi = this.wordIndex(x, y);
+    const m = bitMask(x);
+    return (this.value[wi] & m) !== 0;
+  }
+  private maskWord(wi: number, mask: number, v: boolean): void {
+    const { defined, value } = this;
+    defined[wi] |= mask;
+    value[wi] = (value[wi] & ~mask) | (-v & mask);
+  }
+  set(x: number, y: number, v: DrawValue): void {
+    if (v === undefined) return;
+    this.maskWord(this.wordIndex(x, y), bitMask(x), v);
+  }
+  // word-span fill for constant values (fast path)
+  private fillRectConst(x0: number, y0: number, w: number, h: number, v: DrawValue) {
+    if (w <= 0 || h <= 0) return;
+    if (v === undefined) return;
+    const { value, defined, words } = this;
+    const startWord = x0 >>> 5;
+    const endWord = (x0 + w - 1) >>> 5;
+    const startBit = x0 & 31;
+    const endBit = (x0 + w - 1) & 31;
+    for (let ry = 0; ry < h; ry++) {
+      const rowBase = (y0 + ry) * words;
+      if (startWord === endWord) {
+        const mask = rangeMask(startBit, endBit - startBit + 1);
+        this.maskWord(rowBase + startWord, mask, v);
+        continue;
+      }
+      this.maskWord(rowBase + startWord, rangeMask(startBit, 32 - startBit), v);
+      for (let i = startWord + 1; i < endWord; i++) {
+        defined[rowBase + i] = 0xffffffff;
+        value[rowBase + i] = v ? 0xffffffff : 0;
+      }
+      this.maskWord(rowBase + endWord, rangeMask(0, endBit + 1), v);
+    }
+  }
+  private rectWords(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    cb: (wi: number, bitX: number, xPos: number, yPos: number, bitsInWord: number) => void
+  ): void {
     for (let yPos = 0; yPos < height; yPos++) {
-      for (let xPos = 0; xPos < width; xPos++) {
-        // NOTE: we use give function relative coordinates inside box
-        this.data[y + yPos][x + xPos] =
-          typeof value === 'function'
-            ? value({ x: xPos, y: yPos }, this.data[y + yPos][x + xPos])
-            : value;
+      const Py = y + yPos;
+      for (let xPos = 0; xPos < width; ) {
+        const bitX = x + xPos;
+        const { bit, word } = this.bitIndex(bitX, Py);
+        const bitsPerWord = Math.min(32 - bit, width - xPos);
+        cb(word, bitX, xPos, yPos, bitsPerWord);
+        xPos += bitsPerWord;
       }
     }
+  }
+  // Basically every operation can be represented as rect
+  rect(c: Point | number, size: Size | number, fn: DrawFn): this {
+    const { x, y } = this.xy(c);
+    const { height, width } = Bitmap.size(size, this.size({ x, y }));
+    if (typeof fn !== 'function') {
+      this.fillRectConst(x, y, width, height, fn);
+      return this;
+    }
+    const { defined, value } = this;
+    this.rectWords(x, y, width, height, (wi, bitX, xPos, yPos, n) => {
+      let defWord = 0;
+      let valWord = value[wi];
+      for (let b = 0; b < n; b++) {
+        const mask = bitMask(bitX + b);
+        const res = fn({ x: xPos + b, y: yPos }, (valWord & mask) !== 0);
+        if (res === undefined) continue;
+        defWord |= mask;
+        valWord = (valWord & ~mask) | (-res & mask);
+      }
+      defined[wi] |= defWord;
+      value[wi] = valWord;
+    });
     return this;
   }
   // returns rectangular part of bitmap
   rectRead(c: Point | number, size: Size | number, fn: ReadFn): this {
-    return this.rect(c, size, (c, cur) => {
-      fn(c, cur);
-      return cur;
+    const { x, y } = this.xy(c);
+    const { height, width } = Bitmap.size(size, this.size({ x, y }));
+    const { value } = this;
+    this.rectWords(x, y, width, height, (wi, bitX, xPos, yPos, n) => {
+      const valWord = value[wi];
+      for (let b = 0; b < n; b++) {
+        const mask = bitMask(bitX + b);
+        fn({ x: xPos + b, y: yPos }, (valWord & mask) !== 0);
+      }
     });
+    return this;
   }
   // Horizontal & vertical lines
   hLine(c: Point | number, len: number, value: DrawFn): this {
@@ -268,25 +402,91 @@ export class Bitmap {
   border(border = 2, value: DrawValue): Bitmap {
     const height = this.height + 2 * border;
     const width = this.width + 2 * border;
-    const v = fillArr(border, value);
-    const h: DrawValue[][] = Array.from({ length: border }, () => fillArr(width, value));
-    return new Bitmap({ height, width }, [...h, ...this.data.map((i) => [...v, ...i, ...v]), ...h]);
+    const out = new Bitmap({ height, width });
+    // fill everything with border value, then embed original
+    out.rect(0, Infinity, value);
+    out.embed({ x: border, y: border }, this);
+    return out;
   }
   // Embed another bitmap on coordinates
-  embed(c: Point | number, bm: Bitmap): this {
-    return this.rect(c, bm.size(), ({ x, y }) => bm.data[y][x]);
+  embed(c: Point | number, src: Bitmap): this {
+    const { x, y } = this.xy(c);
+    const { height, width } = Bitmap.size(src.size(), this.size({ x, y }));
+    if (width <= 0 || height <= 0) return this;
+    const { value, defined } = this;
+    const { words: srcStride, value: srcValue } = src;
+    for (let yPos = 0; yPos < height; yPos++) {
+      const srcRow = yPos * srcStride;
+      for (let xPos = 0; xPos < width; ) {
+        const dstX = x + xPos;
+        const { word: dstWord, bit: dstBit } = this.bitIndex(dstX, y + yPos);
+        const { word: srcWord, bit: srcBit } = src.bitIndex(xPos, yPos);
+        const len = Math.min(32 - dstBit, width - xPos);
+        const w0 = srcValue[srcWord];
+        const w1 = srcBit && srcWord + 1 < srcRow + srcStride ? srcValue[srcWord + 1] : 0;
+        const sVal = srcBit ? ((w0 >>> srcBit) | (w1 << (32 - srcBit))) >>> 0 : w0;
+        const dstMask = rangeMask(dstBit, len);
+        const valBits = ((sVal & rangeMask(0, len)) << dstBit) >>> 0;
+        defined[dstWord] |= dstMask;
+        value[dstWord] = (value[dstWord] & ~dstMask) | valBits;
+        xPos += len;
+      }
+    }
+    return this;
   }
   // returns rectangular part of bitmap
   rectSlice(c: Point | number, size: Size | number = this.size()): Bitmap {
-    const rect = new Bitmap(Bitmap.size(size, this.size(this.xy(c))));
-    this.rect(c, size, ({ x, y }, cur) => (rect.data[y][x] = cur));
+    const { x, y } = this.xy(c);
+    const { height, width } = Bitmap.size(size, this.size({ x, y }));
+    const rect = new Bitmap({ height, width });
+    this.rectRead({ x, y }, { height, width }, (p, cur) => {
+      if (this.isDefined(x + p.x, y + p.y)) {
+        rect.set(p.x, p.y, cur);
+      }
+    });
     return rect;
   }
   // Change shape, replace rows with columns (data[y][x] -> data[x][y])
-  inverse(): Bitmap {
-    const { height, width } = this;
-    const res = new Bitmap({ height: width, width: height });
-    return res.rect({ x: 0, y: 0 }, Infinity, ({ x, y }) => this.data[x][y]);
+  transpose(): Bitmap {
+    const { height, width, value, defined, words } = this;
+    const dst = new Bitmap({ height: width, width: height });
+    const { words: dstStride, value: dstValue, defined: dstDefined, tailMask: dstTail } = dst;
+    const tmpV = new Uint32Array(32);
+    const tmpD = new Uint32Array(32);
+    // Process src in blocks: y in [by..by+31], x in 32-bit words
+    for (let by = 0; by < height; by += 32) {
+      for (let bx = 0; bx < words; bx++) {
+        const rows = Math.min(32, height - by);
+        for (let r = 0; r < rows; r++) {
+          const wi = this.wordIndex(32 * bx, by + r);
+          tmpV[r] = value[wi];
+          tmpD[r] = defined[wi];
+        }
+        // zero-pad remainder
+        tmpV.fill(0, rows);
+        tmpD.fill(0, rows);
+        transpose32(tmpV);
+        transpose32(tmpD);
+        for (let i = 0; i < 32; i++) {
+          const dstY = bx * 32 + i;
+          if (dstY >= width) break;
+          const dstPos = dst.wordIndex(by, dstY);
+          const curMask = by >>> 5 === dstStride - 1 ? dstTail : 0xffffffff;
+          dstValue[dstPos] = tmpV[i] & curMask;
+          dstDefined[dstPos] = tmpD[i] & curMask;
+        }
+      }
+    }
+    return dst;
+  }
+  // black <-> white (inplace)
+  negate(): Bitmap {
+    const n = this.defined.length;
+    for (let i = 0; i < n; i++) {
+      this.value[i] = ~this.value[i];
+      this.defined[i] = 0xffffffff;
+    }
+    return this;
   }
   // Each pixel size is multiplied by factor
   scale(factor: number): Bitmap {
@@ -294,37 +494,138 @@ export class Bitmap {
       throw new Error(`invalid scale factor: ${factor}`);
     const { height, width } = this;
     const res = new Bitmap({ height: factor * height, width: factor * width });
-    return res.rect(
-      { x: 0, y: 0 },
-      Infinity,
-      ({ x, y }) => this.data[Math.floor(y / factor)][Math.floor(x / factor)]
+    return res.rect({ x: 0, y: 0 }, Infinity, ({ x, y }) =>
+      this.get((x / factor) | 0, (y / factor) | 0)
     );
   }
   clone(): Bitmap {
     const res = new Bitmap(this.size());
-    return res.rect({ x: 0, y: 0 }, this.size(), ({ x, y }) => this.data[y][x]);
+    res.defined.set(this.defined);
+    res.value.set(this.value);
+    return res;
   }
   // Ensure that there is no undefined values left
   assertDrawn(): void {
-    this.rectRead(0, Infinity, (_, cur) => {
-      if (typeof cur !== 'boolean') throw new Error(`Invalid color type=${typeof cur}`);
-    });
+    const { height, width, defined, tailMask, fullWords, words } = this;
+    if (!height || !width) return;
+    for (let y = 0; y < height; y++) {
+      const rowBase = y * words;
+      for (let wi = 0; wi < fullWords; wi++) {
+        if (defined[rowBase + wi] !== 0xffffffff) throw new Error(`Invalid color type=undefined`);
+      }
+      if (words !== fullWords && (defined[rowBase + fullWords] & tailMask) !== tailMask)
+        throw new Error(`Invalid color type=undefined`);
+    }
   }
-  // Simple string representation for debugging
+  countPatternInRow(y: number, patternLen: number, ...patterns: number[]): number {
+    if (patternLen <= 0 || patternLen >= 32) throw new Error('wrong patternLen');
+    const mask = (1 << patternLen) - 1;
+    const { width, value, words } = this;
+    let count = 0;
+    const rowBase = this.wordIndex(0, y);
+    for (let i = 0, window = 0; i < words; i++) {
+      const w = value[rowBase + i];
+      const bitEnd = i === words - 1 ? width & 31 || 32 : 32;
+      for (let b = 0; b < bitEnd; b++) {
+        window = ((window << 1) | ((w >>> b) & 1)) & mask;
+        if (i * 32 + b + 1 < patternLen) continue;
+        for (const p of patterns) {
+          if (window !== p) continue;
+          count++;
+          break;
+        }
+      }
+    }
+    return count;
+  }
+  getRuns(y: number, fn: (len: number, value: boolean) => void): void {
+    const { width, value, words } = this;
+    if (width === 0) return;
+    let runLen = 0;
+    let runValue: boolean | undefined;
+    const rowBase = this.wordIndex(0, y);
+    for (let i = 0; i < words; i++) {
+      const word = value[rowBase + i];
+      const bitEnd = i === words - 1 ? width & 31 || 32 : 32;
+      for (let b = 0; b < bitEnd; b++) {
+        const bit = (word & (1 << b)) !== 0;
+        if (bit === runValue) {
+          runLen++;
+          continue;
+        }
+        if (runValue !== undefined) fn(runLen, runValue);
+        runValue = bit;
+        runLen = 1;
+      }
+    }
+    if (runValue !== undefined) fn(runLen, runValue);
+  }
+  popcnt(): number {
+    const { height, width, words, fullWords, tailMask } = this;
+    if (!height || !width) return 0;
+    let count = 0;
+    for (let y = 0; y < height; y++) {
+      const rowBase = y * words;
+      for (let wi = 0; wi < fullWords; wi++) count += popcnt(this.value[rowBase + wi]);
+      if (words !== fullWords) count += popcnt(this.value[rowBase + fullWords] & tailMask);
+    }
+    return count;
+  }
+  countBoxes2x2(y: number): number {
+    const { width, words } = this;
+    if (width < 2 || (y | 0) < 0 || y + 1 >= this.height) return 0;
+    const base0 = this.wordIndex(0, y) | 0;
+    const base1 = this.wordIndex(0, y + 1) | 0;
+    // valid "left-edge" positions x in [0 .. W-2]
+    const tailBits = width & 31;
+    const validLast = tailBits === 0 ? 0x7fffffff : rangeMask(0, (width - 1) & 31);
+    let boxes = 0;
+    for (let wi = 0; wi < words; wi++) {
+      const a0 = this.value[base0 + wi];
+      const a1 = this.value[base1 + wi];
+      // Compare bit x with bit x+1 at same bit position.
+      const eqV = ~(a0 ^ a1) >>> 0; // row0[x] == row1[x]
+      const n0 = wi + 1 < words ? this.value[base0 + wi + 1] >>> 0 : 0;
+      const eqH0 = ~(a0 ^ (((a0 >>> 1) | ((n0 & 1) << 31)) >>> 0)) >>> 0; // row0[x] == row0[x+1]
+      const n1 = wi + 1 < words ? this.value[base1 + wi + 1] >>> 0 : 0;
+      const eqH1 = ~(a1 ^ (((a1 >>> 1) | ((n1 & 1) << 31)) >>> 0)) >>> 0; // row1[x] == row1[x+1]
+      let m = (eqV & eqH0 & eqH1) >>> 0;
+      if (wi === words - 1) m &= validLast;
+      boxes += popcnt(m);
+    }
+    return boxes;
+  }
+  // Export
   toString(): string {
-    return this.data
-      .map((i) => i.map((j) => (j === undefined ? '?' : j ? 'X' : ' ')).join(''))
-      .join(String.fromCharCode(chCodes.newline));
+    const nl = String.fromCharCode(chCodes.newline);
+    let out = '';
+    for (let y = 0; y < this.height; y++) {
+      let line = '';
+      for (let x = 0; x < this.width; x++) {
+        const v = this.get(x, y);
+        line += !this.isDefined(x, y) ? '?' : v ? 'X' : ' ';
+      }
+      out += line + (y + 1 === this.height ? '' : nl);
+    }
+    return out;
+  }
+  toRaw(): DrawValue[][] {
+    const out: DrawValue[][] = Array.from({ length: this.height }, () => new Array(this.width));
+    for (let y = 0; y < this.height; y++) {
+      const row = out[y];
+      for (let x = 0; x < this.width; x++) row[x] = this.get(x, y);
+    }
+    return out;
   }
   toASCII(): string {
-    const { height, width, data } = this;
+    const { height, width } = this;
     let out = '';
     // Terminal character height is x2 of character width, so we process two rows of bitmap
     // to produce one row of ASCII
     for (let y = 0; y < height; y += 2) {
       for (let x = 0; x < width; x++) {
-        const first = data[y][x];
-        const second = y + 1 >= height ? true : data[y + 1][x]; // if last row outside bitmap, make it black
+        const first = this.get(x, y);
+        const second = y + 1 >= height ? true : this.get(x, y + 1); // if last row outside bitmap, make it black
         if (!first && !second)
           out += '█'; // both rows white (empty)
         else if (!first && second)
@@ -342,9 +643,16 @@ export class Bitmap {
     const reset = cc + '[0m';
     const whiteBG = cc + '[1;47m  ' + reset;
     const darkBG = cc + `[40m  ` + reset;
-    return this.data
-      .map((i) => i.map((j) => (j ? darkBG : whiteBG)).join(''))
-      .join(String.fromCharCode(chCodes.newline));
+    const nl = String.fromCharCode(chCodes.newline);
+    let out = '';
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        const v = this.get(x, y); // undefined -> white
+        out += v ? darkBG : whiteBG;
+      }
+      out += nl;
+    }
+    return out;
   }
   toSVG(optimize = true): string {
     let out = `<svg viewBox="0 0 ${this.width} ${this.height}" xmlns="http://www.w3.org/2000/svg">`;
@@ -415,7 +723,7 @@ export class Bitmap {
     let i = 0;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const value = !!this.data[y][x] ? 0 : 255;
+        const value = this.get(x, y) ? 0 : 255; // undefined -> white
         data[i++] = value;
         data[i++] = value;
         data[i++] = value;
@@ -822,29 +1130,29 @@ function drawTemplate(
   const alignPos = info.alignmentPatterns(ver);
   for (const y of alignPos) {
     for (const x of alignPos) {
-      if (b.data[y][x] !== undefined) continue;
+      if (b.isDefined(x, y)) continue;
       b.embed({ x: x - 2, y: y - 2 }, align); // center of pattern should be at position
     }
   }
   // Timing patterns
   b = b
-    .hLine({ x: 0, y: 6 }, Infinity, ({ x }, cur) => (cur === undefined ? x % 2 == 0 : cur))
-    .vLine({ x: 6, y: 0 }, Infinity, ({ y }, cur) => (cur === undefined ? y % 2 == 0 : cur));
+    .hLine({ x: 0, y: 6 }, Infinity, ({ x }) => (b.isDefined(x, 6) ? undefined : x % 2 == 0))
+    .vLine({ x: 6, y: 0 }, Infinity, ({ y }) => (b.isDefined(6, y) ? undefined : y % 2 == 0));
   // Format information
   {
     const bits = info.formatBits(ecc, maskIdx);
     const getBit = (i: number) => !test && ((bits >> i) & 1) == 1;
     // vertical
-    for (let i = 0; i < 6; i++) b.data[i][8] = getBit(i); // right of top-left finder
+    for (let i = 0; i < 6; i++) b.set(8, i, getBit(i)); // right of top-left finder
     // TODO: re-write as lines, like:
     // b.vLine({ x: 8, y: 0 }, 6, ({ x, y }) => getBit(y));
-    for (let i = 6; i < 8; i++) b.data[i + 1][8] = getBit(i); // after timing pattern
-    for (let i = 8; i < 15; i++) b.data[size - 15 + i][8] = getBit(i); // right of bottom-left finder
+    for (let i = 6; i < 8; i++) b.set(8, i + 1, getBit(i)); // after timing pattern
+    for (let i = 8; i < 15; i++) b.set(8, size - 15 + i, getBit(i)); // right of bottom-left finder
     // horizontal
-    for (let i = 0; i < 8; i++) b.data[8][size - i - 1] = getBit(i); // under top-right finder
-    for (let i = 8; i < 9; i++) b.data[8][15 - i - 1 + 1] = getBit(i); // VVV, after timing
-    for (let i = 9; i < 15; i++) b.data[8][15 - i - 1] = getBit(i); // under top-left finder
-    b.data[size - 8][8] = !test; // bottom-left finder, right
+    for (let i = 0; i < 8; i++) b.set(size - i - 1, 8, getBit(i)); // under top-right finder
+    for (let i = 8; i < 9; i++) b.set(15 - i - 1 + 1, 8, getBit(i)); // VVV, after timing
+    for (let i = 9; i < 15; i++) b.set(15 - i - 1, 8, getBit(i)); // under top-left finder
+    b.set(8, size - 8, !test); // bottom-left finder, right
   }
   // Version information
   if (ver >= 7) {
@@ -854,8 +1162,8 @@ function drawTemplate(
       const x = Math.floor(i / 3);
       const y = (i % 3) + size - 8 - 3;
       // two copies
-      b.data[x][y] = bit;
-      b.data[y][x] = bit;
+      b.set(y, x, bit);
+      b.set(x, y, bit);
     }
   }
   return b;
@@ -877,7 +1185,7 @@ function zigzag(
     for (; ; y += dir) {
       for (let j = 0; j < 2; j += 1) {
         const x = xOffset - j;
-        if (tpl.data[y][x] !== undefined) continue; // skip already written elements
+        if (tpl.isDefined(x, y)) continue; // skip already written elements
         fn(x, y, pattern(x, y));
       }
       if (y + dir < 0 || y + dir >= size) break;
@@ -975,193 +1283,58 @@ function drawQR(
       value = ((data[i >>> 3] >> ((7 - i) & 7)) & 1) !== 0;
       i++;
     }
-    b.data[y][x] = value !== mask; // !== as xor
+    b.set(x, y, value !== mask); // !== as xor
   });
   if (i !== need) throw new Error('QR: bytes left after draw');
   return b;
 }
 
-function calculateRowRunPenalty(rowBits: readonly boolean[]): number {
-  const moduleCount = rowBits.length;
-  if (moduleCount <= 1) return 0;
+const mkPattern = (pattern: boolean[]) => {
+  const s = pattern.map((i) => (i ? '1' : '0')).join('');
+  return { len: s.length, n: Number(`0b${s}`) };
+};
+// 1:1:3:1:1 ratio (dark:light:dark:light:dark) pattern in row/column, preceded or followed by light area 4 modules wide
+const finderPattern = [true, false, true, true, true, false, true]; // dark:light:dark:light:dark
+const lightPattern = [false, false, false, false]; // light area 4 modules wide
+const P1 = mkPattern([...finderPattern, ...lightPattern]);
+const P2 = mkPattern([...lightPattern, ...finderPattern]);
 
-  let penalty = 0;
-  let runLength = 1;
-  let previousColor = rowBits[0];
-
-  for (let i = 1; i < moduleCount; i++) {
-    const currentColor = rowBits[i];
-    if (currentColor === previousColor) {
-      runLength++;
-    } else {
-      if (runLength >= R1_RUN_LENGTH_THRESHOLD) penalty += runLength - 2;
-      runLength = 1;
-      previousColor = currentColor;
-    }
+function penalty(bm: Bitmap): number {
+  const { width, height } = bm;
+  const transposed = bm.transpose();
+  // Adjacent modules in row/column in same | No. of modules = (5 + i) color
+  let adjacent = 0;
+  for (let y = 0; y < height; y++) {
+    bm.getRuns(y, (len) => {
+      if (len >= 5) adjacent += 3 + (len - 5);
+    });
   }
-
-  if (runLength >= R1_RUN_LENGTH_THRESHOLD) penalty += runLength - 2;
-
-  return penalty;
-}
-
-function calculateColumnRunPenalty(
-  bitmap: readonly boolean[][],
-  columnIndex: number,
-  columnHeight: number
-): number {
-  if (columnHeight <= 1) return 0;
-
-  let penalty = 0;
-  let runLength = 1;
-  let previousColor = bitmap[0][columnIndex];
-
-  for (let y = 1; y < columnHeight; y++) {
-    const currentColor = bitmap[y][columnIndex];
-    if (currentColor === previousColor) {
-      runLength++;
-    } else {
-      if (runLength >= R1_RUN_LENGTH_THRESHOLD) penalty += runLength - 2;
-      runLength = 1;
-      previousColor = currentColor;
-    }
+  for (let y = 0; y < width; y++) {
+    transposed.getRuns(y, (len) => {
+      if (len >= 5) adjacent += 3 + (len - 5);
+    });
   }
+  // Block of modules in same color (Block size = 2x2)
+  let box = 0;
+  for (let y = 0; y < height - 1; y++) box += 3 * bm.countBoxes2x2(y);
 
-  if (runLength >= R1_RUN_LENGTH_THRESHOLD) penalty += runLength - 2;
+  let finder = 0;
+  for (let y = 0; y < height; y++) finder += 40 * bm.countPatternInRow(y, P1.len, P1.n, P2.n);
+  for (let y = 0; y < width; y++)
+    finder += 40 * transposed.countPatternInRow(y, P1.len, P1.n, P2.n);
 
-  return penalty;
-}
-
-function calculateRowFinderPenalty(rowBits: readonly boolean[]): number {
-  const rowLength = rowBits.length;
-  if (rowLength < R3_FINDER_PATTERN_LENGTH) return 0;
-
-  let penalty = 0;
-  const lastStart = rowLength - R3_FINDER_PATTERN_LENGTH;
-
-  for (let i = 0; i <= lastStart; i++) {
-    // Case A: L L L L + 1 0 1 1 1 0 1
-    const light4ThenFinder7 =
-      !rowBits[i] &&
-      !rowBits[i + 1] &&
-      !rowBits[i + 2] &&
-      !rowBits[i + 3] &&
-      rowBits[i + 4] &&
-      !rowBits[i + 5] &&
-      rowBits[i + 6] &&
-      rowBits[i + 7] &&
-      rowBits[i + 8] &&
-      !rowBits[i + 9] &&
-      rowBits[i + 10];
-
-    // Case B: 1 0 1 1 1 0 1 + L L L L
-    const finder7ThenLight4 =
-      rowBits[i] &&
-      !rowBits[i + 1] &&
-      rowBits[i + 2] &&
-      rowBits[i + 3] &&
-      rowBits[i + 4] &&
-      !rowBits[i + 5] &&
-      rowBits[i + 6] &&
-      !rowBits[i + 7] &&
-      !rowBits[i + 8] &&
-      !rowBits[i + 9] &&
-      !rowBits[i + 10];
-
-    if (light4ThenFinder7 || finder7ThenLight4) penalty += R3_FINDER_PENALTY;
-  }
-  return penalty;
-}
-
-function calculateColumnFinderPenalty(
-  matrix: readonly boolean[][],
-  rowIndex: number,
-  width: number
-): number {
-  if (width < R3_FINDER_PATTERN_LENGTH) return 0;
-
-  let penalty = 0;
-  const y = rowIndex;
-  const lastStart = width - R3_FINDER_PATTERN_LENGTH;
-
-  for (let x = 0; x <= lastStart; x++) {
-    // Case A: L L L L + 1 0 1 1 1 0 1
-    const light4ThenFinder7 =
-      !matrix[x][y] &&
-      !matrix[x + 1][y] &&
-      !matrix[x + 2][y] &&
-      !matrix[x + 3][y] &&
-      matrix[x + 4][y] &&
-      !matrix[x + 5][y] &&
-      matrix[x + 6][y] &&
-      matrix[x + 7][y] &&
-      matrix[x + 8][y] &&
-      !matrix[x + 9][y] &&
-      matrix[x + 10][y];
-
-    // Case B: 1 0 1 1 1 0 1 + L L L L
-    const finder7ThenLight4 =
-      matrix[x][y] &&
-      !matrix[x + 1][y] &&
-      matrix[x + 2][y] &&
-      matrix[x + 3][y] &&
-      matrix[x + 4][y] &&
-      !matrix[x + 5][y] &&
-      matrix[x + 6][y] &&
-      !matrix[x + 7][y] &&
-      !matrix[x + 8][y] &&
-      !matrix[x + 9][y] &&
-      !matrix[x + 10][y];
-
-    if (light4ThenFinder7 || finder7ThenLight4) penalty += R3_FINDER_PENALTY;
-  }
-  return penalty;
-}
-
-function penalty(bitmap: Bitmap): number {
-  const matrix = bitmap.data as boolean[][];
-  const width = bitmap.width | 0;
-  const height = bitmap.height | 0;
-
-  if (width === 0 || height === 0) return 0;
-
-  // Rule 1: same-color runs
-  let runPenalty = 0;
-  for (let x = 0; x < width; x++) runPenalty += calculateRowRunPenalty(matrix[x]);
-  for (let y = 0; y < height; y++) runPenalty += calculateColumnRunPenalty(matrix, y, width);
-
-  // Rule 2: 2×2 blocks of the same color
-  let blockPenalty = 0;
-  const lastCol = width - 1;
-  const lastRow = height - 1;
-  for (let x = 0; x < lastCol; x++) {
-    const col = matrix[x];
-    const nextCol = matrix[x + 1];
-    for (let y = 0; y < lastRow; y++) {
-      const cell = col[y];
-      if (cell === nextCol[y] && cell === col[y + 1] && cell === nextCol[y + 1]) {
-        blockPenalty += R2_BLOCK_PENALTY;
-      }
-    }
-  }
-
-  // Rule 3: finder-like 1:1:3:1:1 with 4-light padding
-  let finderPenalty = 0;
-  for (let x = 0; x < width; x++) finderPenalty += calculateRowFinderPenalty(matrix[x]);
-  for (let y = 0; y < height; y++) finderPenalty += calculateColumnFinderPenalty(matrix, y, width);
-
-  // Rule 4: dark-module balance vs 50%
-  let darkCount = 0;
-  for (let x = 0; x < width; x++) {
-    const col = matrix[x];
-    for (let y = 0; y < height; y++) if (col[y]) darkCount++;
-  }
-  const moduleCount = width * height;
-  const darkPercent = (darkCount * 100) / moduleCount;
-  const deviation = Math.abs(darkPercent - 50);
-  const balancePenalty = R4_BALANCE_STEP_POINTS * Math.floor(deviation / R4_BALANCE_STEP_PERCENT);
-
-  return runPenalty + blockPenalty + finderPenalty + balancePenalty;
+  // Proportion of dark modules in entire symbol
+  // Add 10 points to a deviation of 5% increment or decrement in the proportion
+  // ratio of dark module from the referential 50%
+  let darkPixels = 0;
+  darkPixels = bm.popcnt();
+  //bm.rectRead(0, Infinity, (_c, val) => (darkPixels += val ? 1 : 0));
+  // for (let y = 0; y < height; y++) {
+  //   for (let x = 0; x < width; x++) if (bm.get(x, y)) darkPixels++;
+  // }
+  const darkPercent = (darkPixels / (height * width)) * 100;
+  const dark = 10 * Math.floor(Math.abs(darkPercent - 50) / 5);
+  return adjacent + box + finder + dark;
 }
 
 // Selects best mask according to penalty, if no mask is provided
@@ -1273,7 +1446,7 @@ export function encodeQR(text: string, output: Output = 'raw', opts: QrOpts & Sv
   if (!Number.isSafeInteger(border)) throw new Error(`invalid border type=${typeof border}`);
   res = res.border(border, false); // Add border
   if (opts.scale !== undefined) res = res.scale(opts.scale); // Scale image
-  if (output === 'raw') return res.data;
+  if (output === 'raw') return res.toRaw();
   else if (output === 'ascii') return res.toASCII();
   else if (output === 'svg') return res.toSVG(opts.optimize);
   else if (output === 'gif') return res.toGIF();
@@ -1286,6 +1459,7 @@ export default encodeQR;
 export const utils: {
   best: typeof best;
   bin: typeof bin;
+  popcnt: typeof popcnt;
   drawTemplate: typeof drawTemplate;
   fillArr: typeof fillArr;
   info: {
@@ -1331,6 +1505,7 @@ export const utils: {
 } = {
   best,
   bin,
+  popcnt,
   drawTemplate,
   fillArr,
   info,

@@ -20,7 +20,7 @@ const decodeJPG = jpeg.decode(readFileSync('../vectors/boofcv-v3/detection/blurr
 // - Uncool: [instascan](https://github.com/schmich/instascan) is 1MB+ (zxing compiled to js via emscripten), [qrcode](https://github.com/nuintun/qrcode) modern refactor of jsQR (138 stars)
 
 const DECODE = {
-  paulmillr: (jpg) => decodeQR(jpg),
+  '@paulmillr/qr': (jpg) => decodeQR(jpg),
   jsqr: (jpg) => jsqr(jpg.data, jpg.width, jpg.height).data,
   nuintun: (jpg) => {
     // It corrupts image.data...
@@ -50,7 +50,7 @@ const DECODE = {
 
 const ENCODE = {
   // paulmillr/qr doesn't support data-url, nuintun doesn't support ascii
-  paulmillr: (txt, type) => encodeQR(txt, type, { ecc: 'medium' }),
+  '@paulmillr/qr': (txt, type) => encodeQR(txt, type, { ecc: 'medium' }),
   'qrcode-generator': (txt, type) => {
     const code = qrcodeGenerator.default(0, 'M');
     code.addData(txt, 'Alphanumeric');
@@ -73,25 +73,26 @@ const listFiles = (path, isDir = false) =>
   readdirSync(path).filter((i) => statSync(`${path}/${i}`).isDirectory() === isDir);
 
 const percent = (a, b) => `${('' + (a / b) * 100).slice(0, 5)}%`;
-const section = (name) => console.log(`======== ${name} ========`);
+const section = (name) => console.log(`\n# ${name}`);
 
 async function main() {
   for (const type of ['ascii', 'gif']) {
-    section(`encode/${type}`);
+    section(`encode format=${type}`);
     for (const name in ENCODE) {
       const fn = ENCODE[name];
-      await bench(`encode/${name}`, () => fn('HELLO WORLD', type));
+      await bench(`${name}`, () => fn('HELLO WORLD', type));
     }
   }
-  section('encode: big');
+  section('encode of large qr');
   for (const name in ENCODE) {
     const fn = ENCODE[name];
-    await bench(`encode/${name}`, () => fn('H'.repeat(768), 'ascii'));
+    await bench(`${name}`, () => fn('H'.repeat(768), 'ascii'));
   }
+
   section('decode');
   for (const name in DECODE) {
     const fn = DECODE[name];
-    await bench(`decode/${name}`, () => deepStrictEqual(fn(decodeJPG), decodeExp));
+    await bench(`${name}`, () => deepStrictEqual(fn(decodeJPG), decodeExp));
   }
 
   section('Decoding quality');

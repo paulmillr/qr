@@ -25,7 +25,8 @@ limitations under the License.
 
 import type { EncodingType, ErrorCorrection, Image, Mask, Point } from './index.ts';
 import { Bitmap, utils } from './index.ts';
-const { best, bin, drawTemplate, fillArr, info, interleave, validateVersion, zigzag } = utils;
+const { best, bin, drawTemplate, fillArr, info, interleave, validateVersion, zigzag, popcnt } =
+  utils;
 
 // Constants
 const MAX_BITS_ERROR = 3; // Up to 3 bit errors in version/format
@@ -137,7 +138,7 @@ function toBitmap(img: Image): Bitmap {
       const average = sum / 25;
       for (let y = 0, pos = yPos * img.width + xPos; y < block; y += 1, pos += img.width) {
         for (let x = 0; x < block; x++) {
-          if (brightness[pos + x] <= average) matrix.data[yPos + y][xPos + x] = true;
+          if (brightness[pos + x] <= average) matrix.set(xPos + x, yPos + y, true);
         }
       }
     }
@@ -248,10 +249,10 @@ function pattern(p: boolean[], size?: number[]) {
       let x = xStart;
       // If we start in middle of an image, skip first pattern run,
       // since we don't know run length of pixels from left side
-      if (xStart) while (x < xEnd && !!b.data[y][x] === res.pattern[0]) x++;
+      if (xStart) while (x < xEnd && !!b.get(x, y) === res.pattern[0]) x++;
       for (; x < xEnd; x++) {
         // Same run, continue counting
-        if (!!b.data[y][x] === res.pattern[pos]) {
+        if (!!b.get(x, y) === res.pattern[pos]) {
           runs[pos]++;
           // If not last element - continue counting
           if (x !== b.width - 1) continue;
@@ -537,7 +538,18 @@ function detect(b: Bitmap): {
   bits: Bitmap;
   points: FinderPoints;
 } {
-  const { bl, tl, tr } = findFinder(b);
+  let bl, tl, tr;
+  try {
+    ({ bl, tl, tr } = findFinder(b));
+  } catch (e) {
+    try {
+      b.negate();
+      ({ bl, tl, tr } = findFinder(b));
+    } catch (e) {
+      b.negate(); // undo negate
+      throw e;
+    }
+  }
   const moduleSize = (moduleSizeAvg(b, tl, tr) + moduleSizeAvg(b, tl, bl)) / 2;
   if (moduleSize < 1.0) throw new Error(`invalid moduleSize = ${moduleSize}`);
   // Estimate size
@@ -653,7 +665,7 @@ function transform(b: Bitmap, size: number, from: Point4, to: Point4): Bitmap {
     for (let i = 0; i < pointsLength; i += 2) {
       const px = cap(points[i], 0, b.width - 1);
       const py = cap(points[i + 1], 0, b.height - 1);
-      if (b.data[py][px]) res.data[y][i / 2] = true;
+      if (b.get(px, py)) res.set((i / 2) | 0, y, true);
     }
   }
   return res;
@@ -662,7 +674,7 @@ function transform(b: Bitmap, size: number, from: Point4, to: Point4): Bitmap {
 // Same as in drawTemplate, but reading
 // TODO: merge in CoderType?
 function readInfoBits(b: Bitmap) {
-  const readBit = (x: number, y: number, out: number) => (out << 1) | (b.data[y][x] ? 1 : 0);
+  const readBit = (x: number, y: number, out: number) => (out << 1) | (b.get(x, y) ? 1 : 0);
   const size = b.height;
   // Version information
   let version1 = 0;
@@ -686,14 +698,6 @@ function readInfoBits(b: Bitmap) {
 
 function parseInfo(b: Bitmap) {
   // Population count over xor -> hamming distance
-  const popcnt = (a: number) => {
-    let cnt = 0;
-    while (a) {
-      if (a & 1) cnt++;
-      a >>= 1;
-    }
-    return cnt;
-  };
   const size = b.height;
   const { version1, version2, format1, format2 } = readInfoBits(b);
   // Guess format
@@ -738,11 +742,47 @@ function parseInfo(b: Bitmap) {
 // Global symbols in both browsers and Node.js since v11
 // See https://github.com/microsoft/TypeScript/issues/31535
 declare const TextDecoder: any;
-function bytesToUtf8(bytes: Uint8Array): string {
-  return new TextDecoder().decode(new Uint8Array(bytes));
+
+// Common encodings, please open issue if something popular missing
+const eciToEncoding: Record<number, string> = {
+  1: 'iso-8859-1',
+  2: 'ibm437',
+  3: 'iso-8859-1',
+  4: 'iso-8859-2',
+  5: 'iso-8859-3',
+  6: 'iso-8859-4',
+  7: 'iso-8859-5',
+  8: 'iso-8859-6',
+  9: 'iso-8859-7',
+  10: 'iso-8859-8',
+  11: 'iso-8859-9',
+  13: 'iso-8859-11',
+  15: 'iso-8859-13',
+  16: 'iso-8859-14',
+  17: 'iso-8859-15',
+  18: 'iso-8859-16',
+  20: 'shift-jis',
+  21: 'windows-1250',
+  22: 'windows-1251',
+  23: 'windows-1252',
+  24: 'windows-1256',
+  25: 'utf-16be',
+  26: 'utf-8',
+  28: 'big5',
+  29: 'gbk',
+  30: 'euc-kr',
+};
+
+function decodeWithEci(bytes: Uint8Array, eci: number = 26): string {
+  const encoding = eciToEncoding[eci];
+  if (!encoding) throw new Error(`Unsupported ECI: ${eci}`);
+  return new TextDecoder(encoding).decode(bytes);
 }
 
-function decodeBitmap(b: Bitmap, decoder: (bytes: Uint8Array) => string = bytesToUtf8): string {
+function decodeBitmap(
+  b: Bitmap,
+  decoder: (bytes: Uint8Array, eci: number) => string = decodeWithEci
+): string {
   const size = b.height;
   if (size < 21 || (size & 0b11) !== 1 || size !== b.width)
     throw new Error(`decode: invalid size=${size}`);
@@ -756,7 +796,7 @@ function decodeBitmap(b: Bitmap, decoder: (bytes: Uint8Array) => string = bytesT
   zigzag(tpl, mask, (x, y, m) => {
     bitPos++;
     buf <<= 1;
-    buf |= +(!!b.data[y][x] !== m);
+    buf |= +(!!b.get(x, y) !== m);
     if (bitPos !== 8) return;
     bytes[pos++] = buf;
     bitPos = 0;
@@ -784,6 +824,7 @@ function decodeBitmap(b: Bitmap, decoder: (bytes: Uint8Array) => string = bytesT
     '1000': 'kanji',
   };
   let res = '';
+  let eci: number = 26; // Default to utf-8 for compat with old behavior
   while (true) {
     if (bits.length < 4) break;
     const modeBits = readBits(4);
@@ -815,10 +856,16 @@ function decodeBitmap(b: Bitmap, decoder: (bytes: Uint8Array) => string = bytesT
         count -= 2;
       }
       if (count === 1) res += info.alphabet.alphanumerc.encode([toNum(readBits(6))]).join('');
+    } else if (mode === 'eci') {
+      const first = toNum(readBits(8));
+      if ((first & 0x80) === 0) eci = first;
+      else if ((first & 0xc0) === 0x80) eci = ((first & 0x3f) << 8) | toNum(readBits(8));
+      else eci = ((first & 0x1f) << 16) | toNum(readBits(16));
+      continue; // ECI doesn't carry data, just sets state
     } else if (mode === 'byte') {
-      let utf8 = [];
-      for (let i = 0; i < count; i++) utf8.push(Number(`0b${readBits(8)}`));
-      res += decoder(new Uint8Array(utf8));
+      const data = new Uint8Array(count);
+      for (let i = 0; i < count; i++) data[i] = toNum(readBits(8));
+      res += decoder(data, eci);
     } else throw new Error(`Unknown mode=${mode}`);
   }
   return res;
