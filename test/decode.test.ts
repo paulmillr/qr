@@ -444,6 +444,7 @@ should('gh-28 (invert)', () => {
 });
 
 should('gh-28 (eci)', () => {
+  if (process.versions.bun) return; // ECI fails in bun, its TextEncoder doesn't support it
   // From: https://www.barcodefaq.com/2d/eci/
   const jpg = readJPEG(pjoin('..', 'issues', 'eci.jpg'));
   const res = readQR(jpg);
