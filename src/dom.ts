@@ -354,3 +354,17 @@ export function svgToPng(svgData: string, width: number, height: number): Promis
     img.onerror = reject;
   });
 }
+
+export async function gifToPng(gifBytes: Uint8Array): Promise<Blob> {
+  const blob = new Blob([ gifBytes as BufferSource ], { type: 'image/gif' });
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext('bitmaprenderer', { alpha: false });
+    if (!ctx) throw new Error('was not able to create bitmaprenderer context');
+    ctx.transferFromImageBitmap(bitmap);
+    return await canvas.convertToBlob({ type: 'image/png' });
+  } finally {
+    bitmap.close();
+  }
+}
