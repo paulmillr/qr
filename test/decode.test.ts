@@ -97,6 +97,29 @@ should('Decode', () => {
   deepStrictEqual(res, 'https://www.surveymonkey.com/s/TheClubatLAS_T3');
 });
 
+should('toBitmap: unaligned RGBA view matches aligned RGBA data', () => {
+  const width = 40;
+  const height = 40;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const v = (x * 17 + y * 29) & 0xff;
+      rgba[i] = v;
+      rgba[i + 1] = (v * 3 + x) & 0xff;
+      rgba[i + 2] = (255 - v + y) & 0xff;
+      rgba[i + 3] = 255;
+    }
+  }
+  const shifted = new Uint8ClampedArray(rgba.length + 1);
+  shifted.set(rgba, 1);
+  const unaligned = shifted.subarray(1);
+  const alignedBmp = _tests.toBitmap({ width, height, data: rgba });
+  const unalignedBmp = _tests.toBitmap({ width, height, data: unaligned });
+  deepStrictEqual(unaligned.byteOffset & 3, 1);
+  deepStrictEqual(unalignedBmp.toASCII(), alignedBmp.toASCII());
+});
+
 const listFiles = (path, isDir = false) =>
   readdirSync(path).filter((i) => statSync(`${path}/${i}`).isDirectory() === isDir);
 
@@ -144,6 +167,7 @@ const DECODED = {
     'image007.jpg': ['https://www.surveymonkey.com/s/TheClubatLAS_T3'],
     'image011.jpg': ['HTTPS://NUTS.COM/QR/retail_piece/51707477?sku=7030-01'],
     'image012.jpg': ['http://g.augme.com/1803'],
+    'image013.jpg': ['http://g.augme.com/1803'],
     'image014.jpg': ['http://flydulles.com/survey'],
     'image018.jpg': ['Version 1 QR'],
     'image025.jpg': ['http://www.boschautoparts.com/qr/icon.aspx'],
@@ -157,6 +181,9 @@ const DECODED = {
   },
   bright_spots: {
     'image004.jpg': ['Version 1 QR', 'Version 2 QR Code Test Image'],
+    'image006.jpg': [
+      'ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789',
+    ],
     'image007.jpg': ['Version 2 QR Code Test Image'],
     'image009.jpg': ['Version 1 QR'],
     'image011.jpg': ['Version 1 QR'],
@@ -179,6 +206,9 @@ const DECODED = {
     'image028.jpg': ['Version 2 QR Code Test Image'],
   },
   close: {
+    'image029.jpg': [
+      'ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789',
+    ],
     'image030.jpg': [
       'ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789',
     ],
@@ -224,6 +254,7 @@ const DECODED = {
     'image022.jpg': ['https://goo.gl/forms/ofwmcoJn1qN6HPb72'],
     'image027.jpg': ['http://uqr.me/acgovdehvehicles'],
     'image029.jpg': ['https://goo.gl/forms/ofwmcoJn1qN6HPb72'],
+    'image035.jpg': ['http://bit.ly/l5qo2F?r=qr'],
     'image040.jpg': [
       'http://www.youtube.com/watch?v=7qa6Bho4OyM&feature=share&list=PLk13TE2t32tgRCVo0q8tTB1CyZyMDQCNH&index=10',
     ],
@@ -286,11 +317,14 @@ const DECODED = {
     'image047.jpg': ['http://www.boschautoparts.com/qr/icon.aspx'],
     'image048.jpg': ['http://bit.ly/l5qo2F?r=qr'],
     'image049.jpg': ['65729741957'],
+    'image050.jpg': ['65729741957'],
     'image051.jpg': ['http://goo.gl/ErBxV'],
     'image052.jpg': ['http://goo.gl/ErBxV'],
     'image053.jpg': ['http://goo.gl/ErBxV'],
     'image055.jpg': ['http://www.bestekmall.com/'],
     'image057.jpg': ['{"lastNode":"OAK5","cids":{"pkey":"180410194824527404022960201AZ"}}'],
+    'image058.jpg': ['{"lastNode":"OAK5","cids":{"pkey":"180410194824527404022960201AZ"}}'],
+    'image059.jpg': ['{"lastNode":"OAK5","cids":{"pkey":"180410194824527404022960201AZ"}}'],
     'image060.jpg': ['http://www.bestekmall.com/'],
     'image061.jpg': ['{"lastNode":"OAK5","cids":{"pkey":"180410194824527404022960201AZ"}}'],
     'image062.jpg': [
@@ -299,6 +333,8 @@ const DECODED = {
     'image063.jpg': [
       'http://www.postalexperience.com/pos?mt=4&sc=840-5940-0244-002-00006-80522-02',
     ],
+    'image064.jpg': ['http://www.postalexperience.com/pos?mt=4&sc=840-5940-0244-002-00006-80522-02'],
+    'image065.jpg': ['GH69-28945C'],
   },
   noncompliant: {},
   pathological: {},
@@ -371,13 +407,10 @@ for (const category of listFiles(DETECTION_PATH, true)) {
       const p = `detection/${category}/${f}`;
       const EXCLUDE = [
         'blurred/image025.jpg',
-        'brightness/image006.jpg',
-        'brightness/image007.jpg',
         'curved/image015.jpg',
         'curved/image022.jpg',
         'curved/image049.jpg',
         'glare/image050.jpg',
-        'nominal/image015.jpg',
         'nominal/image020.jpg',
         'nominal/image021.jpg',
         'nominal/image022.jpg',

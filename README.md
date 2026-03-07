@@ -3,11 +3,11 @@
 Minimal 0-dependency QR code generator & reader.
 
 - 🔒 Auditable, 0-dependency
+- 🏎 Fast: [faster](#speed) than all JS implementations
+- 🔍 Reliable: 100MB+ of extensive test vectors ensure correctness
 - 🏞️ Encoding (generating) supports ASCII, term, gif, svg and png codes
 - 📷 Decoding (reading) supports camera feed input, files and non-browser environments
-- 🏎 Fast: faster than all JS implementations
-- 🔍 Extensive tests ensure correctness: 100MB+ of vectors
-- 🪶 16KB (gzipped) for encoding + decoding, 9KB for encoding
+- 🪶 18KB (gzipped) for encoding + decoding, 9KB for encoding
 
 Check out:
 
@@ -248,14 +248,14 @@ qrcode-generator x 2,909 ops/sec @ 343μs/op
 nuintun x 3,470 ops/sec @ 288μs/op
 
 # encode of large qr
-@paulmillr/qr x 318 ops/sec @ 3ms/op
+@paulmillr/qr x 334 ops/sec @ 2ms/op
 qrcode-generator x 174 ops/sec @ 5ms/op
 nuintun x 221 ops/sec @ 4ms/op
 
 # decode
-@paulmillr/qr x 162 ops/sec @ 6ms/op ± 3.78% (5ms..16ms)
-jsqr x 50 ops/sec @ 19ms/op ± 5.44% (18ms..35ms)
-nuintun x 49 ops/sec @ 20ms/op ± 5.08% (18ms..36ms)
+@paulmillr/qr x 662 ops/sec @ 1ms/op
+jsqr x 50 ops/sec @ 19ms/op
+nuintun x 49 ops/sec @ 20ms/op
 instascan x 128 ops/sec @ 7ms/op ± 31.44% (4ms..166ms)
 ```
 
