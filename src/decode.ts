@@ -17,10 +17,6 @@ limitations under the License.
 /**
  * Methods for decoding (reading) QR code patterns.
  * @module
- * @example
-```js
-
-```
  */
 
 import type { EncodingType, ErrorCorrection, Image, Mask, Point } from './index.ts';
@@ -53,6 +49,7 @@ for (let i = 0; i < SUM16.length; i++) {
 const int = (n: number) => n >>> 0;
 
 type Point4 = [Point, Point, Point, Point];
+/** Finder and alignment points returned by the detector. */
 export type FinderPoints = [Pattern, Pattern, Point, Pattern];
 // distance ^ 2
 const distance2 = (p1: Point, p2: Point) => {
@@ -1182,12 +1179,35 @@ function decodeBitmap(
   return res;
 }
 
+/** QR decoding hooks and image preprocessing options. */
 export type DecodeOpts = {
+  /** Crop rectangular inputs to a centered square before decoding. */
   cropToSquare?: boolean;
+  /**
+   * Custom byte-to-text decoder used for byte segments.
+   * @param bytes - Byte segment to decode.
+   * @returns Decoded text.
+   */
   textDecoder?: (bytes: Uint8Array) => string;
+  /**
+   * Callback invoked with finder/alignment points after detection succeeds.
+   * @param points - Finder and alignment points returned by the detector.
+   */
   pointsOnDetect?: (points: FinderPoints) => void;
+  /**
+   * Callback invoked with the grayscale bitmap that the detector sees.
+   * @param img - Grayscale image generated during bitmap conversion.
+   */
   imageOnBitmap?: (img: Image) => void;
+  /**
+   * Callback invoked with the perspective-corrected QR image.
+   * @param img - Perspective-corrected QR image.
+   */
   imageOnDetect?: (img: Image) => void;
+  /**
+   * Callback invoked with the final decoded QR image.
+   * @param img - Final QR image used to decode the payload.
+   */
   imageOnResult?: (img: Image) => void;
 };
 
@@ -1211,6 +1231,22 @@ function cropToSquare(img: Image) {
   return { offset, img: { height: squareSize, width: squareSize, data: croppedData } };
 }
 
+/**
+ * Decode text from a QR image.
+ * @param img - RGB or RGBA image data that contains a QR code.
+ * @param opts - Decoder hooks and image preprocessing options. See {@link DecodeOpts}.
+ * @returns Decoded QR payload as a string.
+ * @throws If the image, decoder options, or QR contents are invalid. {@link Error}
+ * @example
+ * Decode text from a QR image.
+ * ```ts
+ * import encodeQR, { Bitmap } from 'qr';
+ * import decodeQR from 'qr/decode.js';
+ * const bits = encodeQR('Hello world', 'raw', { scale: 4 });
+ * const bm = new Bitmap({ width: bits[0].length, height: bits.length }, bits);
+ * const text = decodeQR(bm.toImage());
+ * ```
+ */
 export function decodeQR(img: Image, opts: DecodeOpts = {}): string {
   for (const field of ['height', 'width'] as const) {
     if (!Number.isSafeInteger(img[field]) || img[field] <= 0)
@@ -1240,6 +1276,22 @@ export function decodeQR(img: Image, opts: DecodeOpts = {}): string {
   return res;
 }
 
+/**
+ * Default export alias for {@link decodeQR}.
+ * @param img - RGB or RGBA image data that contains a QR code.
+ * @param opts - Decoder hooks and image preprocessing options. See {@link DecodeOpts}.
+ * @returns Decoded QR payload as a string.
+ * @throws If the image, decoder options, or QR contents are invalid. {@link Error}
+ * @example
+ * Decode a rendered QR image via the default decoder export.
+ * ```ts
+ * import encodeQR, { Bitmap } from 'qr';
+ * import decodeQR from 'qr/decode.js';
+ * const bits = encodeQR('Hello world', 'raw', { scale: 4 });
+ * const bm = new Bitmap({ width: bits[0].length, height: bits.length }, bits);
+ * decodeQR(bm.toImage());
+ * ```
+ */
 export default decodeQR;
 
 // Unsafe API utils, exported only for tests

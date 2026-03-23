@@ -35,8 +35,19 @@ const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
 // We do not use newline escape code directly in strings because it's not parser-friendly
 const chCodes = { newline: 10, reset: 27 };
 
+/** Bidirectional codec interface. */
 export interface Coder<F, T> {
+  /**
+   * Encodes a source value into the target representation.
+   * @param from - Source value to encode.
+   * @returns Encoded representation.
+   */
   encode(from: F): T;
+  /**
+   * Decodes a target value back into the source representation.
+   * @param to - Encoded representation to decode.
+   * @returns Decoded source value.
+   */
   decode(to: T): F;
 }
 
@@ -186,13 +197,41 @@ Basic bitmap structure for two colors (black & white) small images.
   will work on a single bit anyway. It will only reduce storage without
   significant performance impact, but will increase code complexity
 */
-export type Point = { x: number; y: number };
-export type Size = { height: number; width: number };
-export type Image = Size & { data: Uint8Array | Uint8ClampedArray | number[] };
+/** Two-dimensional point. */
+export type Point = {
+  /** Horizontal coordinate. */
+  x: number;
+  /** Vertical coordinate. */
+  y: number;
+};
+/** Width and height pair. */
+export type Size = {
+  /** Pixel height. */
+  height: number;
+  /** Pixel width. */
+  width: number;
+};
+/** Raster image used by the encoder and decoder. */
+export type Image = Size & {
+  /** Row-major RGB or RGBA pixel data. */
+  data: Uint8Array | Uint8ClampedArray | number[];
+};
 type DrawValue = boolean | undefined; // undefined=not written, true=foreground, false=background
 // value or fn returning value based on coords
 type DrawFn = DrawValue | ((c: Point, curr: DrawValue) => DrawValue);
 type ReadFn = (c: Point, curr: DrawValue) => void;
+/**
+ * Mutable monochrome bitmap used as the internal QR representation.
+ * @param size - Square edge length or explicit bitmap dimensions.
+ * @param data - Optional row-major pixel matrix using `true`, `false`, or `undefined`.
+ * @example
+ * Create a bitmap, then scale it for display.
+ * ```ts
+ * import { Bitmap } from 'qr';
+ * const bitmap = Bitmap.fromString('X \n X');
+ * bitmap.scale(2);
+ * ```
+ */
 export class Bitmap {
   private static size(size: Size | number, limit?: Size) {
     if (typeof size === 'number') size = { height: size, width: size };
@@ -736,17 +775,17 @@ export class Bitmap {
 // End of utils
 
 // Runtime type-checking
-/** Error correction mode. low: 7%, medium: 15%, quartile: 25%, high: 30% */
+/** Error correction mode. low: 7%, medium: 15%, quartile: 25%, high: 30%. */
 export const ECMode = ['low', 'medium', 'quartile', 'high'] as const;
-/** Error correction mode. */
+/** Error correction mode name. */
 export type ErrorCorrection = (typeof ECMode)[number];
-/** QR Code version. */
+/** QR Code version in the `[1..40]` range. */
 export type Version = number; // 1..40
-/** QR Code mask type */
+/** QR Code mask index. */
 export type Mask = (0 | 1 | 2 | 3 | 4 | 5 | 6 | 7) & keyof typeof PATTERNS; // 0..7
-/** QR Code encoding */
+/** Supported QR payload encodings. */
 export const Encoding = ['numeric', 'alphanumeric', 'byte', 'kanji', 'eci'] as const;
-/** QR Code encoding type */
+/** QR payload encoding name. */
 export type EncodingType = (typeof Encoding)[number];
 
 // Various constants & tables
@@ -1210,7 +1249,15 @@ function detectType(str: string): EncodingType {
 // See https://github.com/microsoft/TypeScript/issues/31535
 declare const TextEncoder: any;
 /**
- * @example utf8ToBytes('abc') // new Uint8Array([97, 98, 99])
+ * Encode a string as UTF-8 bytes.
+ * @param str - Text to encode into UTF-8.
+ * @returns UTF-8 bytes for the provided string.
+ * @throws If the input is not a string. {@link Error}
+ * @example
+ * Encode a string as UTF-8 bytes.
+ * ```ts
+ * const bytes = utf8ToBytes('abc'); // new Uint8Array([97, 98, 99])
+ * ```
  */
 export function utf8ToBytes(str: string): Uint8Array {
   if (typeof str !== 'string') throw new Error(`utf8ToBytes expected string, got ${typeof str}`);
@@ -1296,8 +1343,8 @@ const mkPattern = (pattern: boolean[]) => {
 // 1:1:3:1:1 ratio (dark:light:dark:light:dark) pattern in row/column, preceded or followed by light area 4 modules wide
 const finderPattern = [true, false, true, true, true, false, true]; // dark:light:dark:light:dark
 const lightPattern = [false, false, false, false]; // light area 4 modules wide
-const P1 = mkPattern([...finderPattern, ...lightPattern]);
-const P2 = mkPattern([...lightPattern, ...finderPattern]);
+const P1 = /* @__PURE__ */ (() => mkPattern([...finderPattern, ...lightPattern]))();
+const P2 = /* @__PURE__ */ (() => mkPattern([...lightPattern, ...finderPattern]))();
 
 function penalty(bm: Bitmap): number {
   const { width, height } = bm;
@@ -1351,31 +1398,43 @@ function drawQRBest(ver: Version, ecc: ErrorCorrection, data: Uint8Array, maskId
 
 /** QR Code generation options. */
 export type QrOpts = {
+  /** Error-correction level to encode into the symbol. */
   ecc?: ErrorCorrection | undefined;
+  /** Explicit payload encoding, otherwise detected from the input text. */
   encoding?: EncodingType | undefined;
+  /**
+   * Custom text encoder used for `byte` payloads.
+   * @param text - Text payload to encode as bytes.
+   * @returns Encoded byte sequence.
+   */
   textEncoder?: (text: string) => Uint8Array;
+  /** Explicit QR version to use instead of auto-fitting. */
   version?: Version | undefined;
+  /** Explicit mask pattern to apply instead of choosing the best one. */
   mask?: number | undefined;
+  /** Quiet-zone border width in modules. */
   border?: number | undefined;
+  /** Output scale multiplier for raster formats. */
   scale?: number | undefined;
 };
+/** SVG-specific QR output options. */
 export type SvgQrOpts = {
   /**
    * Controls how cells are generated within the SVG.
    *
    * If `true`:
    *   - Cells are drawn using a single `path` element.
-   *   - Pro: significantly reduces the size of the QR code (>70% smaller than
+   *   - Pro: significantly reduces the size of the QR code (`70%` smaller than
    *     unoptimized).
    *   - Con: less flexible with visually customizing cell shapes.
    *
    * If `false`:
    *   - Each cell is drawn with its own `rect` element.
    *   - Pro: allows more flexibility with visually customizing cells shapes.
-   *   - Con: significantly increases the QR code size (>230% larger than
+   *   - Con: significantly increases the QR code size (`230%` larger than
    *     optimized).
    *
-   * @default true
+   * Default is `true`.
    */
   optimize?: boolean | undefined;
 };
@@ -1393,22 +1452,26 @@ function validateMask(mask: Mask) {
   if (![0, 1, 2, 3, 4, 5, 6, 7].includes(mask) || !PATTERNS[mask])
     throw new Error(`Invalid mask=${mask}. Expected number [0..7]`);
 }
+/** Supported encoder outputs. */
 export type Output = 'raw' | 'ascii' | 'term' | 'gif' | 'svg';
 
 /**
  * Encodes (creates / generates) QR code.
- * @param text text that would be encoded
- * @param output output type: raw, ascii, svg, gif, or term
- * @param opts
+ * @param text - Text payload that should be encoded into the QR symbol.
+ * @param output - Output format to generate: raw matrix, ASCII, terminal ANSI, GIF, or SVG.
+ * @param opts - Encoding and rendering options. See {@link QrOpts} and {@link SvgQrOpts}.
+ * @returns Encoded QR data in the format selected by `output`.
+ * @throws If the payload, options, QR capacity, or output format are invalid. {@link Error}
  * @example
-```js
-const txt = 'Hello world';
-const ascii = encodeQR(txt, 'ascii'); // Not all fonts are supported
-const terminalFriendly = encodeQR(txt, 'term'); // 2x larger, all fonts are OK
-const gifBytes = encodeQR(txt, 'gif'); // Uncompressed GIF
-const svgElement = encodeQR(txt, 'svg'); // SVG vector image element
-const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
-```
+ * Encode one text payload into several QR output formats.
+ * ```ts
+ * const txt = 'Hello world';
+ * const ascii = encodeQR(txt, 'ascii'); // Not all fonts are supported
+ * const terminalFriendly = encodeQR(txt, 'term'); // 2x larger, all fonts are OK
+ * const gifBytes = encodeQR(txt, 'gif'); // Uncompressed GIF
+ * const svgElement = encodeQR(txt, 'svg'); // SVG vector image element
+ * const array = encodeQR(txt, 'raw'); // 2d array for canvas or other libs
+ * ```
  */
 export function encodeQR(text: string, output: 'raw', opts?: QrOpts): boolean[][];
 export function encodeQR(text: string, output: 'ascii' | 'term', opts?: QrOpts): string;
@@ -1454,8 +1517,31 @@ export function encodeQR(text: string, output: Output = 'raw', opts: QrOpts & Sv
   else throw new Error(`Unknown output: ${output}`);
 }
 
+/**
+ * Default export alias for {@link encodeQR}.
+ * @param text - Text payload that should be encoded into the QR symbol.
+ * @param output - Output format to generate: raw matrix, ASCII, terminal ANSI, GIF, or SVG.
+ * @param opts - Encoding and rendering options. See {@link QrOpts} and {@link SvgQrOpts}.
+ * @returns Encoded QR data in the format selected by `output`.
+ * @throws If the payload, options, QR capacity, or output format are invalid. {@link Error}
+ * @example
+ * Encode text into the default export from the package root.
+ * ```ts
+ * import encodeQR from 'qr';
+ * encodeQR('Hello world', 'ascii');
+ * ```
+ */
 export default encodeQR;
 
+/**
+ * Low-level helpers used by the encoder and test suite.
+ * @example
+ * Read low-level QR metadata tables.
+ * ```ts
+ * import { utils } from 'qr';
+ * const size = utils.info.size.encode(1); // 21
+ * ```
+ */
 export const utils: {
   best: typeof best;
   bin: typeof bin;

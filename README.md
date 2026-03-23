@@ -76,25 +76,30 @@ const larger = encodeQR(txt, 'gif', { scale: 4 });
 // };
 
 console.log(ascii);
-> █████████████████████████████████████
-> ██ ▄▄▄▄▄ █  ▀▄▄█ ██▀▄▄▄▄█ ▀█ ▄▄▄▄▄ ██
-> ██ █   █ █▀▄▀▄ ▄▄█▄█ ██▀█▀▀█ █   █ ██
-> ██ █▄▄▄█ ██ ▄▄█▄▀▀ ▀ ██ ▄ ▄█ █▄▄▄█ ██
-> ██▄▄▄▄▄▄▄█ ▀ ▀ █▄▀ ▀ ▀▄█ █ █▄▄▄▄▄▄▄██
-> ██ █  ▀ ▄▄▀▀▀ █▀ ▄   ▀▀▄▀ ▄█ ▀█ ▀▄▄██
-> ██▀▀▀  ▀▄▄██▄▀▀▄█▀ ▀▄█    ▀▀▀ ▄ █▄▄██
-> █████▄▀▀▄▄██ ▀ ▀ ▄▄██▄ ▄▄ ▄ █▀█ █ ███
-> ███   ▄▀▄█▄▄▄█   ▀██▄▄▄▀▀█▄▀ ▄█▀ ████
-> ██▀▀ ▄ ▀▄ ▄▄██▀▄▀▀████▄▄▄ █▄ █  █▀▀██
-> ██▀▀▄ ▄▀▄ ▀▀█▄▀▀▄▄▀▀ █▄▄▀█▀ ▀▄ █▄ ▀██
-> ██▀▄▀██ ▄▄ ▀█▄█▀ ▀ ▀█▄▀▀ █▄▀▀ █  █ ██
-> ███▀█▄▀▄▄ █  █ ██ ██ ▄ █ ▄▄▄ ▄▀▀▄▄ ██
-> ██▄█▄▄▄█▄█ ▄ ▄▀█▀▀ ▄▀ █▀ ▄ ▄▄▄ ▀▄▀▄██
-> ██ ▄▄▄▄▄ █ ▄█▄▀▀ ▀█   █▄█  █▄█ ▀▀▄▀██
-> ██ █   █ █▀ ▄▀█ ██ ▄▄▀██   ▄▄ ▄█   ██
-> ██ █▄▄▄█ █▄  ██▀ ▄▄ ▀█ ▄      ▀▄▄█▀██
-> ██▄▄▄▄▄▄▄█▄███▄█▄█▄▄▄▄█▄█▄████▄▄█████
-> ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+```
+
+Example output:
+
+```text
+█████████████████████████████████████
+██ ▄▄▄▄▄ █  ▀▄▄█ ██▀▄▄▄▄█ ▀█ ▄▄▄▄▄ ██
+██ █   █ █▀▄▀▄ ▄▄█▄█ ██▀█▀▀█ █   █ ██
+██ █▄▄▄█ ██ ▄▄█▄▀▀ ▀ ██ ▄ ▄█ █▄▄▄█ ██
+██▄▄▄▄▄▄▄█ ▀ ▀ █▄▀ ▀ ▀▄█ █ █▄▄▄▄▄▄▄██
+██ █  ▀ ▄▄▀▀▀ █▀ ▄   ▀▀▄▀ ▄█ ▀█ ▀▄▄██
+██▀▀▀  ▀▄▄██▄▀▀▄█▀ ▀▄█    ▀▀▀ ▄ █▄▄██
+█████▄▀▀▄▄██ ▀ ▀ ▄▄██▄ ▄▄ ▄ █▀█ █ ███
+███   ▄▀▄█▄▄▄█   ▀██▄▄▄▀▀█▄▀ ▄█▀ ████
+██▀▀ ▄ ▀▄ ▄▄██▀▄▀▀████▄▄▄ █▄ █  █▀▀██
+██▀▀▄ ▄▀▄ ▀▀█▄▀▀▄▄▀▀ █▄▄▀█▀ ▀▄ █▄ ▀██
+██▀▄▀██ ▄▄ ▀█▄█▀ ▀ ▀█▄▀▀ █▄▀▀ █  █ ██
+███▀█▄▀▄▄ █  █ ██ ██ ▄ █ ▄▄▄ ▄▀▀▄▄ ██
+██▄█▄▄▄█▄█ ▄ ▄▀█▀▀ ▄▀ █▀ ▄ ▄▄▄ ▀▄▀▄██
+██ ▄▄▄▄▄ █ ▄█▄▀▀ ▀█   █▄█  █▄█ ▀▀▄▀██
+██ █   █ █▀ ▄▀█ ██ ▄▄▀██   ▄▄ ▄█   ██
+██ █▄▄▄█ █▄  ██▀ ▄▄ ▀█ ▄      ▀▄▄█▀██
+██▄▄▄▄▄▄▄█▄███▄█▄█▄▄▄▄█▄█▄████▄▄█████
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 ```
 
 ## Decoding
@@ -143,21 +148,23 @@ function decodeWithExternal() {
 ### Decoding options
 
 ```ts
-export type Point4 = { x: number; y: number }[];
-export type Image = {
+type Point = { x: number; y: number };
+type Pattern = Point & { moduleSize: number; count: number };
+type FinderPoints = [Pattern, Pattern, Point, Pattern];
+type Image = {
   height: number;
   width: number;
   data: Uint8Array | Uint8ClampedArray | number[];
 };
-export type DecodeOpts = {
-  // By default we assume that image has 4 channel per pixel (RGBA). isRGB: true will force to use only one
-  isRGB?: boolean;
-  // Returns 4 center (3 finder pattern + 1 alignment pattern) points if detected
-  detectFn?: (points: Point4) => void;
-  // Returns RGBA image of detected QR code
-  qrFn?: (img: Image) => void;
+type DecodeOpts = {
+  cropToSquare?: boolean;
+  textDecoder?: (bytes: Uint8Array) => string;
+  pointsOnDetect?: (points: FinderPoints) => void;
+  imageOnBitmap?: (img: Image) => void;
+  imageOnDetect?: (img: Image) => void;
+  imageOnResult?: (img: Image) => void;
 };
-export default function decodeQR(img: Image, opts: DecodeOpts = {});
+declare function decodeQR(img: Image, opts?: DecodeOpts): string;
 ```
 
 ### Decoding algorithm

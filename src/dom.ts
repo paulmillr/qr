@@ -26,6 +26,18 @@ limitations under the License.
 import decodeQR, { type DecodeOpts, type FinderPoints } from './decode.ts';
 import type { Image } from './index.ts';
 
+/**
+ * Read rendered element dimensions from computed CSS.
+ * @param elm - Element whose computed width and height should be parsed.
+ * @returns Pixel width and height parsed from computed styles.
+ * @example
+ * Read rendered element dimensions from computed CSS.
+ * ```ts
+ * import { getSize } from 'qr/dom.js';
+ * const video = document.querySelector('video')!;
+ * const { width, height } = getSize(video);
+ * ```
+ */
 export const getSize = (
   elm: HTMLElement
 ): {
@@ -55,23 +67,48 @@ const clearCanvas = ({ canvas, context }: CanvasWithContext) => {
   context.clearRect(0, 0, canvas.width, canvas.height);
 };
 
+/** `QRCanvas` drawing and decode options. */
 export type QRCanvasOpts = {
-  resultBlockSize: number; // block size per pixel for resulting qr code image
+  /** Pixel scale used when painting the decoded QR preview. */
+  resultBlockSize: number;
+  /** Fill color for the detected QR quadrilateral. */
   overlayMainColor: string;
+  /** Fill color for the detected finder patterns. */
   overlayFinderColor: string;
+  /** Fill color for the cropped side bars around the preview. */
   overlaySideColor: string;
-  overlayTimeout: number; // how must time from last detect until hide overlay stuff
-  cropToSquare: boolean; // crop image to square
+  /** Time in milliseconds to keep the overlay visible after the last detection. */
+  overlayTimeout: number;
+  /** Crop incoming frames to a centered square before decoding. */
+  cropToSquare: boolean;
+  /**
+   * Custom byte-to-text decoder used for byte segments.
+   * @param bytes - Byte segment to decode.
+   * @returns Decoded text.
+   */
   textDecoder?: (bytes: Uint8Array) => string;
 };
 
+/** Optional output canvases used by `QRCanvas`. */
 export type QRCanvasElements = {
-  overlay?: HTMLCanvasElement; // Overlay
-  bitmap?: HTMLCanvasElement; // What decoder see
-  resultQR?: HTMLCanvasElement; // QR code on successful parse
+  /** Canvas used to draw the overlay polygon and finder boxes. */
+  overlay?: HTMLCanvasElement;
+  /** Canvas used to show the bitmap fed into the decoder. */
+  bitmap?: HTMLCanvasElement;
+  /** Canvas used to show the successfully decoded QR image. */
+  resultQR?: HTMLCanvasElement;
 };
 /**
- * Handles canvases for QR code decoding
+ * Handles canvases for QR code decoding.
+ * @param elements - Optional output canvases used for overlays and previews. See {@link QRCanvasElements}.
+ * @param opts - Drawing and decode options for the helper canvases. See {@link QRCanvasOpts}.
+ * @example
+ * Create a `QRCanvas` that paints overlay highlights onto a DOM canvas.
+ * ```ts
+ * import { QRCanvas } from 'qr/dom.js';
+ * const overlay = document.createElement('canvas');
+ * const canvas = new QRCanvas({ overlay });
+ * ```
  */
 export class QRCanvas {
   private opts: QRCanvasOpts;
@@ -81,10 +118,8 @@ export class QRCanvas {
   private bitmap?: CanvasWithContext;
   private resultQR?: CanvasWithContext;
 
-  constructor(
-    { overlay, bitmap, resultQR }: QRCanvasElements = {},
-    opts: Partial<QRCanvasOpts> = {}
-  ) {
+  constructor(elements: QRCanvasElements = {}, opts: Partial<QRCanvasOpts> = {}) {
+    const { overlay, bitmap, resultQR } = elements;
     this.opts = {
       resultBlockSize: 8,
       overlayMainColor: 'green',
@@ -268,12 +303,17 @@ class QRCamera {
 /**
  * Creates new QRCamera from frontal camera
  * @param player - HTML Video element
+ * @returns Camera wrapper backed by the selected media stream.
  * @example
+ * Create a camera helper and read frames into a `QRCanvas`.
+ * ```ts
+ * import { QRCanvas, frontalCamera } from 'qr/dom.js';
+ * const player = document.querySelector('video')!;
  * const canvas = new QRCanvas();
- * const camera = frontalCamera();
- * const devices = await camera.listDevices();
- * await camera.setDevice(devices[0].deviceId); // Change camera
- * const res = camera.readFrame(canvas);
+ * const camera = await frontalCamera(player);
+ * camera.readFrame(canvas);
+ * camera.stop();
+ * ```
  */
 export async function frontalCamera(player: HTMLVideoElement): Promise<QRCamera> {
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -290,11 +330,18 @@ export async function frontalCamera(player: HTMLVideoElement): Promise<QRCamera>
 }
 
 /**
- * Run callback in a loop with requestAnimationFrame
- * @param cb - callback
+ * Run callback in a loop with requestAnimationFrame.
+ * @param cb - Callback invoked for each requested animation frame.
+ * @returns Canceller that stops the scheduled loop.
  * @example
- * const cancel = frameLoop((ns) => console.log(ns));
+ * Run a callback on every animation frame until cancelled.
+ * ```ts
+ * import { frameLoop } from 'qr/dom.js';
+ * const cancel = frameLoop(() => {
+ *   document.body.dataset.frame = '1';
+ * });
  * cancel();
+ * ```
  */
 export function frameLoop(cb: FrameRequestCallback): () => void {
   let handle: number | undefined = undefined;
@@ -310,6 +357,20 @@ export function frameLoop(cb: FrameRequestCallback): () => void {
   };
 }
 
+/**
+ * Convert an SVG string into a PNG data URL in browser environments.
+ * @param svgData - SVG markup to rasterize.
+ * @param width - Output PNG width in pixels.
+ * @param height - Output PNG height in pixels.
+ * @returns Promise that resolves to a PNG `data:` URL.
+ * @example
+ * Convert an SVG string into a PNG data URL in browser environments.
+ * ```ts
+ * import { svgToPng } from 'qr/dom.js';
+ * const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>';
+ * const pngUrl = await svgToPng(svg, 256, 256);
+ * ```
+ */
 export function svgToPng(svgData: string, width: number, height: number): Promise<string> {
   return new Promise((resolve, reject) => {
     if (
@@ -355,6 +416,19 @@ export function svgToPng(svgData: string, width: number, height: number): Promis
   });
 }
 
+/**
+ * Convert GIF bytes into a PNG blob in browser environments.
+ * @param gifBytes - GIF file contents.
+ * @returns Promise that resolves to a PNG blob.
+ * @throws If the browser cannot create an image bitmap or rendering context for the GIF. {@link Error}
+ * @example
+ * Convert GIF bytes into a PNG blob in browser environments.
+ * ```ts
+ * import { gifToPng } from 'qr/dom.js';
+ * const gif = new Uint8Array(await (await fetch('/qr.gif')).arrayBuffer());
+ * const png = await gifToPng(gif);
+ * ```
+ */
 export async function gifToPng(gifBytes: Uint8Array): Promise<Blob> {
   const blob = new Blob([gifBytes as BufferSource], { type: 'image/gif' });
   const bitmap = await createImageBitmap(blob);
