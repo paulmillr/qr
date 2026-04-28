@@ -1,5 +1,5 @@
 import { should } from '@paulmillr/jsbt/test.js';
-import { deepStrictEqual } from 'node:assert';
+import { deepStrictEqual, throws } from 'node:assert';
 import encodeQR, { _tests } from '../src/index.ts';
 import { jsonGZ } from './utils.ts';
 const TEST_CASES = jsonGZ('vectors/small-vectors.json.gz');
@@ -389,6 +389,35 @@ should('Penalty 3', () => {
     const v1 = _tests.drawQR(2, 'low', data, i, true);
     deepStrictEqual(_tests.penalty(v1), sum(VECTORS[i]));
   }
+});
+
+should('Penalty dark ratio boundary', () => {
+  const cases = [
+    { dark: 8, penalty: 10, rows: ['XXXX', 'X X ', '    ', 'X X ', '    '] },
+    { dark: 9, penalty: 0, rows: ['XXXX', 'X X ', 'X   ', 'X X ', '    '] },
+    { dark: 10, penalty: 0, rows: ['XXXX', 'X X ', 'XX  ', 'X X ', '    '] },
+    { dark: 11, penalty: 0, rows: ['XXXX', 'X X ', 'XXX ', 'X X ', '    '] },
+    { dark: 12, penalty: 10, rows: ['XXXX', 'X X ', 'XXXX', 'X X ', '    '] },
+  ];
+  const actual = cases.map(({ rows }) => {
+    const bm = new _tests.Bitmap({ width: 4, height: 5 });
+    for (let y = 0; y < rows.length; y++) {
+      for (let x = 0; x < rows[y].length; x++) bm.set(x, y, rows[y][x] === 'X');
+    }
+    return { dark: bm.popcnt(), penalty: _tests.penalty(bm) };
+  });
+  deepStrictEqual(
+    actual,
+    cases.map(({ dark, penalty }) => ({ dark, penalty }))
+  );
+});
+
+should('encodeQR rejects non-positive and unsafe border sizes', () => {
+  throws(() => encodeQR('x', 'raw', { border: 0 }), new Error('invalid border=0'));
+  throws(() => encodeQR('x', 'raw', { border: -1 }), new Error('invalid border=-1'));
+  throws(() => encodeQR('x', 'raw', { border: 0.5 }), new Error('invalid border=0.5'));
+  throws(() => encodeQR('x', 'raw', { border: NaN }), new Error('invalid border=NaN'));
+  throws(() => encodeQR('x', 'raw', { border: Infinity }), new Error('invalid border=Infinity'));
 });
 
 should('Full API test', () => {

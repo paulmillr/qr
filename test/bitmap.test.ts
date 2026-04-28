@@ -1,5 +1,5 @@
 import { should } from '@paulmillr/jsbt/test.js';
-import { deepStrictEqual } from 'node:assert';
+import { deepStrictEqual, throws } from 'node:assert';
 import { GifReader } from 'omggif';
 import encodeQR, { _tests } from '../src/index.ts';
 const { Bitmap } = _tests;
@@ -116,6 +116,164 @@ X
    X
     `,
     'rect diagonal inverse'
+  );
+});
+
+should('Bitmap rejects zero dimensions', () => {
+  throws(
+    () => new Bitmap(0),
+    new Error('Bitmap: invalid height=0, expected positive safe integer dimension')
+  );
+  throws(
+    () => new Bitmap({ height: 0, width: 1 }),
+    new Error('Bitmap: invalid height=0, expected positive safe integer dimension')
+  );
+  throws(
+    () => new Bitmap({ height: 1, width: 0 }),
+    new Error('Bitmap: invalid width=0, expected positive safe integer dimension')
+  );
+  throws(
+    () => Bitmap.fromString(''),
+    new Error('Bitmap: invalid width=0, expected positive safe integer dimension')
+  );
+});
+
+should('Bitmap rejects non-positive and unsafe dimensions', () => {
+  throws(
+    () => new Bitmap({ height: 1, width: -1 }),
+    new Error('Bitmap: invalid width=-1, expected positive safe integer dimension')
+  );
+  throws(
+    () => new Bitmap({ height: -1, width: 1 }),
+    new Error('Bitmap: invalid height=-1, expected positive safe integer dimension')
+  );
+  throws(
+    () => new Bitmap(Infinity),
+    new Error('Bitmap: invalid height=Infinity, expected positive safe integer dimension')
+  );
+  throws(
+    () => new Bitmap({ height: 1, width: Infinity }),
+    new Error('Bitmap: invalid width=Infinity, expected positive safe integer dimension')
+  );
+  throws(
+    () => new Bitmap({ height: Infinity, width: 1 }),
+    new Error('Bitmap: invalid height=Infinity, expected positive safe integer dimension')
+  );
+  throws(
+    () => new Bitmap({ height: 1, width: NaN }),
+    new Error('Bitmap: invalid width=NaN (number)')
+  );
+  throws(
+    () => new Bitmap({ height: NaN, width: 1 }),
+    new Error('Bitmap: invalid height=NaN (number)')
+  );
+  throws(
+    () => new Bitmap({ height: 1, width: 1.5 }),
+    new Error('Bitmap: invalid width=1.5 (number)')
+  );
+  throws(
+    () => new Bitmap({ height: 1.5, width: 1 }),
+    new Error('Bitmap: invalid height=1.5 (number)')
+  );
+  throws(
+    () => new Bitmap({ height: 1, width: Number.MAX_SAFE_INTEGER + 1 }),
+    new Error('Bitmap: invalid width=9007199254740992 (number)')
+  );
+  throws(
+    () => new Bitmap({ height: Number.MAX_SAFE_INTEGER + 1, width: 1 }),
+    new Error('Bitmap: invalid height=9007199254740992 (number)')
+  );
+});
+
+should('Bitmap.border rejects non-positive and unsafe sizes', () => {
+  const b = new Bitmap({ height: 2, width: 2 });
+  throws(() => b.border(0, false), new Error('Bitmap.border: invalid size=0'));
+  throws(() => b.border(-1, false), new Error('Bitmap.border: invalid size=-1'));
+  throws(() => b.border(0.5, false), new Error('Bitmap.border: invalid size=0.5'));
+  throws(() => b.border(NaN, false), new Error('Bitmap.border: invalid size=NaN'));
+  throws(() => b.border(Infinity, false), new Error('Bitmap.border: invalid size=Infinity'));
+});
+
+should('Bitmap.countPatternInRow validates scan inputs', () => {
+  const b = new Bitmap({ height: 1, width: 4 }, [[false, false, false, false]]);
+  deepStrictEqual(
+    {
+      valid: b.countPatternInRow(0, 2, 0),
+      negativeRow: b.countPatternInRow(-1, 2, 0),
+      pastEndRow: b.countPatternInRow(1, 2, 0),
+      fractionalRow: b.countPatternInRow(0.5, 2, 0),
+      nanRow: b.countPatternInRow(NaN, 2, 0),
+    },
+    { valid: 3, negativeRow: 0, pastEndRow: 0, fractionalRow: 0, nanRow: 0 }
+  );
+  throws(() => b.countPatternInRow(0, 1.5, 0), new Error('wrong patternLen'));
+  throws(() => b.countPatternInRow(0, NaN, 0), new Error('wrong patternLen'));
+});
+
+should('Bitmap.getRuns validates row input', () => {
+  const b = new Bitmap({ height: 2, width: 6 }, [
+    [false, false, true, true, true, false],
+    [true, false, true, false, false, false],
+  ]);
+  const runs = (y) => {
+    const out = [];
+    b.getRuns(y, (len, value) => out.push([len, value]));
+    return out;
+  };
+  deepStrictEqual(
+    {
+      validFirst: runs(0),
+      validSecond: runs(1),
+      negativeRow: runs(-1),
+      pastEndRow: runs(2),
+      fractionalRow: runs(0.5),
+      nanRow: runs(NaN),
+    },
+    {
+      validFirst: [
+        [2, false],
+        [3, true],
+        [1, false],
+      ],
+      validSecond: [
+        [1, true],
+        [1, false],
+        [1, true],
+        [3, false],
+      ],
+      negativeRow: [],
+      pastEndRow: [],
+      fractionalRow: [],
+      nanRow: [],
+    }
+  );
+});
+
+should('Bitmap.countBoxes2x2 validates row input', () => {
+  const b = new Bitmap({ height: 3, width: 4 }, [
+    [true, true, true, true],
+    [true, true, false, false],
+    [false, false, false, false],
+  ]);
+  deepStrictEqual(
+    {
+      validFirst: b.countBoxes2x2(0),
+      validSecond: b.countBoxes2x2(1),
+      negativeRow: b.countBoxes2x2(-1),
+      pastEndRow: b.countBoxes2x2(2),
+      negativeFractional: b.countBoxes2x2(-0.5),
+      positiveFractional: b.countBoxes2x2(0.5),
+      nanRow: b.countBoxes2x2(NaN),
+    },
+    {
+      validFirst: 1,
+      validSecond: 1,
+      negativeRow: 0,
+      pastEndRow: 0,
+      negativeFractional: 0,
+      positiveFractional: 0,
+      nanRow: 0,
+    }
   );
 });
 

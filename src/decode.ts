@@ -19,16 +19,18 @@ limitations under the License.
  * @module
  */
 
-import type { EncodingType, ErrorCorrection, Image, Mask, Point } from './index.ts';
+import type { EncodingType, ErrorCorrection, Image, Mask, Point, TArg, TRet } from './index.ts';
 import { Bitmap, utils } from './index.ts';
-const { best, bin, drawTemplate, fillArr, info, interleave, validateVersion, zigzag, popcnt } =
-  utils;
 
 // Constants
 const MAX_BITS_ERROR = 3; // Up to 3 bit errors in version/format
+// Kept at 8: the block-stat fast path reads two u32 words per row and the
+// average uses `sum >>> 6`, so the current binarizer assumes 8x8 = 64 pixels.
 const GRAYSCALE_BLOCK_SIZE = 8;
 const GRAYSCALE_RANGE = 24;
 const PATTERN_VARIANCE = 2;
+// Diagonal finder scans are noisier under blur/perspective than horizontal or
+// vertical runs, so they use a looser ratio tolerance.
 const PATTERN_VARIANCE_DIAGONAL = 1.333;
 const PATTERN_MIN_CONFIRMATIONS = 2;
 const DETECT_MIN_ROW_SKIP = 3;
@@ -46,6 +48,8 @@ for (let i = 0; i < SUM16.length; i++) {
 }
 
 // TODO: move to index, nearby with bitmap and other graph related stuff?
+// Fast truncation for values expected to be non-negative; negatives would wrap
+// through uint32 because this uses `>>> 0`, not `Math.floor()`.
 const int = (n: number) => n >>> 0;
 
 type Point4 = [Point, Point, Point, Point];
@@ -75,11 +79,18 @@ const ctz32 = (v: number) => {
   if (v === 0) return 32;
   return 31 - Math.clz32((v & -v) >>> 0);
 };
-function cap(value: number, min?: number, max?: number) {
-  return Math.max(Math.min(value, max || value), min || value);
+function cap(value: number, min?: number, max?: number): number {
+  // ISO/IEC 18004:2024 §12 h) builds the sampling grid from "module centres";
+  // detector callers pass `0` as a real image edge when clipping those samples
+  // and search windows. `|| value` treats that bound as absent.
+  let res = value;
+  if (max !== undefined) res = Math.min(res, max);
+  if (min !== undefined) res = Math.max(res, min);
+  return res;
 }
-function getBytesPerPixel(img: Image): number {
-  const perPixel = img.data.length / (img.width * img.height);
+function getBytesPerPixel(img: TArg<Image>): number {
+  const image = img as Image;
+  const perPixel = image.data.length / (image.width * image.height);
   if (perPixel === 3 || perPixel === 4) return perPixel; // RGB or RGBA
   throw new Error(`Unknown image format, bytes per pixel=${perPixel}`);
 }
@@ -104,10 +115,11 @@ function isBytes(data: unknown): data is Uint8Array {
  * bitmap where finder patterns survive perspective / blur / highlights while
  * keeping false dark regions low enough for downstream finder selection.
  */
-function toBitmap(img: Image): Bitmap {
-  const width = img.width;
-  const height = img.height;
-  const data = img.data;
+function toBitmap(img: TArg<Image>): TRet<Bitmap> {
+  const image = img as Image;
+  const width = image.width;
+  const height = image.height;
+  const data = image.data;
   const bytesPerPixel = getBytesPerPixel(img);
   const pixLen = height * width;
   const brightness = new Uint8Array(pixLen);
@@ -418,7 +430,7 @@ function toBitmap(img: Image): Bitmap {
       }
     }
   }
-  return matrix;
+  return matrix as TRet<Bitmap>;
 }
 
 // Various utilities for pattern
@@ -453,7 +465,7 @@ type Runs = number[];
  * @returns
  */
 function pattern(p: boolean[], size?: number[]) {
-  const _size = size || fillArr(p.length, 1);
+  const _size = size || utils.fillArr(p.length, 1);
   if (p.length !== _size.length) throw new Error('invalid pattern');
   if (!(p.length & 1)) throw new Error('invalid pattern, length should be odd');
   const res = {
@@ -461,7 +473,7 @@ function pattern(p: boolean[], size?: number[]) {
     length: p.length,
     pattern: p,
     size: _size,
-    runs: () => fillArr(p.length, 0),
+    runs: () => utils.fillArr(p.length, 0),
     totalSize: sum(_size),
     total: (runs: Runs) => runs.reduce((acc, i) => acc + i),
     shift: (runs: Runs, n: number) => {
@@ -476,7 +488,11 @@ function pattern(p: boolean[], size?: number[]) {
       return true;
     },
     add(out: Pattern[], x: number, y: number, total: number) {
-      const moduleSize = total / FINDER.totalSize;
+      // ISO/IEC 18004:2024 §5.3.3.1 gives finder runs as "1:1:3:1:1";
+      // §5.3.6 defines alignment as "5 x 5 dark modules", "3 x 3 light
+      // modules", and a central dark module. Use this pattern's own run width
+      // so alignment candidates are not divided by finder width 7.
+      const moduleSize = total / res.totalSize;
       const cur = { x, y, moduleSize, count: 1 };
       for (let idx = 0; idx < out.length; idx++) {
         const f = out[idx];
@@ -491,12 +507,13 @@ function pattern(p: boolean[], size?: number[]) {
       end -= runs[res.center] / 2;
       return end;
     },
-    check(b: Bitmap, runs: Runs, center: Point, incr: Point, maxCount?: number) {
+    check(b: TArg<Bitmap>, runs: Runs, center: Point, incr: Point, maxCount?: number) {
+      const bm = b as Bitmap;
       let j = 0;
       let i = pointClone(center);
       const neg = pointNeg(incr);
       const check = (p: number, step: Point) => {
-        for (; b.isInside(i) && !!b.point(i) === res.pattern[p]; pointIncr(i, step)) {
+        for (; bm.isInside(i) && !!bm.point(i) === res.pattern[p]; pointIncr(i, step)) {
           runs[p]++;
           j++;
         }
@@ -513,17 +530,18 @@ function pattern(p: boolean[], size?: number[]) {
       return j;
     },
     scanLine(
-      b: Bitmap,
+      b: TArg<Bitmap>,
       y: number,
       xStart: number,
       xEnd: number,
       fn: (runs: Runs, x: number) => boolean | void
     ) {
+      const bm = b as Bitmap;
       const runs = res.runs();
       // Finder scanning also couples to Bitmap internals so it can scan packed
       // 32-bit words directly instead of re-reading one pixel bit at a time.
-      const words = (b as unknown as { words: number }).words;
-      const vals = (b as unknown as { value: Uint32Array }).value;
+      const words = (bm as unknown as { words: number }).words;
+      const vals = (bm as unknown as { value: Uint32Array }).value;
       const row = y * words;
       const pattern = res.pattern;
       // Scan one packed bitmap row by jumping whole equal-bit runs inside 32-bit
@@ -563,7 +581,7 @@ function pattern(p: boolean[], size?: number[]) {
           runs[pos] += n;
           x += n - 1;
           // If not last element - continue counting
-          if (x !== b.width - 1) continue;
+          if (x !== bm.width - 1) continue;
           // Last element finishes run, set x outside of run
           x++;
         }
@@ -591,16 +609,17 @@ function pattern(p: boolean[], size?: number[]) {
   };
   return res;
 }
-// light/dark/light/dark/light in 1:1:3:1:1 ratio
-const FINDER = pattern([true, false, true, false, true], [1, 1, 3, 1, 1]);
-// dark/light/dark in 1:1:1 ratio
-const ALIGNMENT = pattern([false, true, false]);
+// dark/light/dark/light/dark in 1:1:3:1:1 ratio
+const FINDER = /* @__PURE__ */ pattern([true, false, true, false, true], [1, 1, 3, 1, 1]);
+// central light/dark/light runs of an alignment pattern in 1:1:1 ratio
+const ALIGNMENT = /* @__PURE__ */ pattern([false, true, false]);
 
-function findFinder(b: Bitmap): {
+function findFinder(b: TArg<Bitmap>): {
   bl: Pattern;
   tl: Pattern;
   tr: Pattern;
 } {
+  const bm = b as Bitmap;
   let found: Pattern[] = [];
   function checkRuns(runs: Runs, v = 2) {
     const total = sum(runs);
@@ -611,7 +630,7 @@ function findFinder(b: Bitmap): {
   // Non-diagonal line (horizontal or vertical)
   function checkLine(center: Point, maxCount: number, total: number, incr: Point) {
     const runs = FINDER.runs();
-    let i = FINDER.check(b, runs, center, incr, maxCount);
+    let i = FINDER.check(bm, runs, center, incr, maxCount);
     if (i === false) return false;
     const runsTotal = sum(runs);
     if (5 * Math.abs(runsTotal - total) >= 2 * total) return false;
@@ -633,17 +652,17 @@ function findFinder(b: Bitmap): {
     x = xx + int(x);
     // Diagonal
     const dRuns = FINDER.runs();
-    if (!FINDER.check(b, dRuns, { x: int(x), y: int(y) }, { x: 1, y: 1 })) return false;
+    if (!FINDER.check(bm, dRuns, { x: int(x), y: int(y) }, { x: 1, y: 1 })) return false;
     if (!checkRuns(dRuns, PATTERN_VARIANCE_DIAGONAL)) return false;
     FINDER.add(found, x, y, total);
     return true;
   }
   let skipped = false;
   // Start with high skip lines count until we find first pattern
-  let ySkip = cap(int((3 * b.height) / (4 * 97)), DETECT_MIN_ROW_SKIP);
+  let ySkip = cap(int((3 * bm.height) / (4 * 97)), DETECT_MIN_ROW_SKIP);
   let done = false;
-  for (let y = ySkip - 1; y < b.height && !done; y += ySkip) {
-    FINDER.scanLine(b, y, 0, b.width, (runs, x) => {
+  for (let y = ySkip - 1; y < bm.height && !done; y += ySkip) {
+    FINDER.scanLine(bm, y, 0, bm.width, (runs, x) => {
       if (!check(runs, y, x)) return;
       // Found pattern
       // Reduce row skip, since we found pattern and qr code is nearby
@@ -681,7 +700,7 @@ function findFinder(b: Bitmap): {
   const flen = found.length;
   if (flen < 3) throw new Error(`Finder: len(found) = ${flen}`);
   found.sort((i, j) => i.moduleSize - j.moduleSize);
-  const pBest = best<[Pattern, Pattern, Pattern]>();
+  const pBest = utils.best<[Pattern, Pattern, Pattern]>();
   // Qubic complexity, but we stop search when we found 3 patterns, so not a problem
   for (let i = 0; i < flen - 2; i++) {
     const fi = found[i];
@@ -728,21 +747,26 @@ function findFinder(b: Bitmap): {
   return { bl, tl, tr };
 }
 
-function findAlignment(b: Bitmap, est: Pattern, allowanceFactor: number) {
+function findAlignment(b: TArg<Bitmap>, est: Pattern, allowanceFactor: number): Pattern {
+  const bm = b as Bitmap;
   const { moduleSize } = est;
   const allowance = int(allowanceFactor * moduleSize);
   const leftX = cap(est.x - allowance, 0);
-  const rightX = cap(est.x + allowance, undefined, b.width - 1);
+  const rightX = cap(est.x + allowance, undefined, bm.width - 1);
   const x = rightX - leftX;
   const topY = cap(est.y - allowance, 0);
-  const bottomY = cap(est.y + allowance, undefined, b.height - 1);
+  const bottomY = cap(est.y + allowance, undefined, bm.height - 1);
   const y = bottomY - topY;
   if (x < moduleSize * 3 || y < moduleSize * 3)
     throw new Error(`x = ${x}, y=${y} moduleSize = ${moduleSize}`);
   const xStart = leftX;
   const yStart = topY;
-  const width = rightX - leftX;
-  const height = bottomY - topY;
+  // ISO/IEC 18004:2024 §12 h)3 scans the alignment pattern's white-square
+  // outline from the provisional centre. `rightX` / `bottomY` are inclusive
+  // clipped image coordinates; convert them to exclusive scan bounds below so
+  // an exact 5x5 search window still includes its final row and column.
+  const width = rightX - leftX + 1;
+  const height = bottomY - topY + 1;
   const found: Pattern[] = [];
   const xEnd = xStart + width;
   const middleY = int(yStart + height / 2);
@@ -750,13 +774,13 @@ function findAlignment(b: Bitmap, est: Pattern, allowanceFactor: number) {
     const diff = int((yGen + 1) / 2);
     const y = middleY + (yGen & 1 ? -diff : diff);
     let res;
-    ALIGNMENT.scanLine(b, y, xStart, xEnd, (runs, x) => {
+    ALIGNMENT.scanLine(bm, y, xStart, xEnd, (runs, x) => {
       if (!ALIGNMENT.checkSize(runs, moduleSize)) return;
       const total = sum(runs);
       const xx = ALIGNMENT.toCenter(runs, x);
       // Vertical
       const rVert = ALIGNMENT.runs();
-      let v = ALIGNMENT.check(b, rVert, { x: int(xx), y }, { y: 1, x: 0 }, 2 * runs[1]);
+      let v = ALIGNMENT.check(bm, rVert, { x: int(xx), y }, { y: 1, x: 0 }, 2 * runs[1]);
       if (v === false) return;
       v += y;
       const vTotal = sum(rVert);
@@ -773,7 +797,8 @@ function findAlignment(b: Bitmap, est: Pattern, allowanceFactor: number) {
   throw new Error('Alignment pattern not found');
 }
 
-function _single(b: Bitmap, from: Point, to: Point) {
+function _single(b: TArg<Bitmap>, from: Point, to: Point) {
+  const bm = b as Bitmap;
   // http://en.wikipedia.org/wiki/Bresenham's_line_algorithm
   let steep = false;
   let d = { x: Math.abs(to.x - from.x), y: Math.abs(to.y - from.y) };
@@ -791,8 +816,10 @@ function _single(b: Bitmap, from: Point, to: Point) {
   for (let x = from.x, y = from.y; x !== xLimit; x += step.x) {
     let real = { x, y };
     if (steep) real = pointMirror(real);
-    // Same as alignment pattern ([true, false, true])
-    if ((runPos === 1) === !!b.point(real)) {
+    // Starting from a dark finder center, walk until the ray crosses
+    // light -> dark -> light; `BWBRunLength()` mirrors this to recover the
+    // full finder width around the center point.
+    if ((runPos === 1) === !!bm.point(real)) {
       if (runPos === 2) return distance({ x, y }, from);
       runPos++;
     }
@@ -806,12 +833,13 @@ function _single(b: Bitmap, from: Point, to: Point) {
   return NaN;
 }
 
-function BWBRunLength(b: Bitmap, from: Point, to: Point) {
-  let result = _single(b, from, to);
+function BWBRunLength(b: TArg<Bitmap>, from: Point, to: Point) {
+  const bm = b as Bitmap;
+  let result = _single(bm, from, to);
   let scaleY = 1.0;
   const { x: fx, y: fy } = from;
   let otherToX = fx - (to.x - fx);
-  const bw = b.width;
+  const bw = bm.width;
   if (otherToX < 0) {
     scaleY = fx / (fx - otherToX);
     otherToX = 0;
@@ -819,9 +847,15 @@ function BWBRunLength(b: Bitmap, from: Point, to: Point) {
     scaleY = (bw - 1 - fx) / (otherToX - fx);
     otherToX = bw - 1;
   }
+  // ISO/IEC 18004:2024 §12 b) uses finder runs in the 1:1:3:1:1 ratio,
+  // and §12 h)1 derives module size from finder pattern width. Clipping the
+  // reflected ray before `int()` would avoid `>>> 0` wrapping negative near-edge
+  // coordinates to a huge uint32 and clamping to the wrong edge. Policy: keep
+  // the existing heuristic because the direct fix degraded decode performance
+  // on current vectors (BoofCV sweep 134/485 -> 132/485).
   let otherToY = int(fy - (to.y - fy) * scaleY);
   let scaleX = 1.0;
-  const bh = b.height;
+  const bh = bm.height;
   if (otherToY < 0) {
     scaleX = fy / (fy - otherToY);
     otherToY = 0;
@@ -830,53 +864,64 @@ function BWBRunLength(b: Bitmap, from: Point, to: Point) {
     otherToY = bh - 1;
   }
   otherToX = int(fx + (otherToX - fx) * scaleX);
-  result += _single(b, from, { x: otherToX, y: otherToY });
+  result += _single(bm, from, { x: otherToX, y: otherToY });
+  // Both mirrored rays include the center module once, so drop one module
+  // after summing them into the full finder-width estimate.
   return result - 1.0;
 }
 
-function moduleSizeAvg(b: Bitmap, p1: Point, p2: Point) {
+function moduleSizeAvg(b: TArg<Bitmap>, p1: Point, p2: Point) {
   const est1 = BWBRunLength(b, pointInt(p1), pointInt(p2));
   const est2 = BWBRunLength(b, pointInt(p2), pointInt(p1));
+  // One ray can fail near image edges, so keep the surviving estimate
+  // instead of discarding the finder-width measurement outright.
   if (Number.isNaN(est1)) return est2 / FINDER.totalSize;
   if (Number.isNaN(est2)) return est1 / FINDER.totalSize;
   return (est1 + est2) / (2 * FINDER.totalSize);
 }
 
-function detect(b: Bitmap): {
+function detect(b: TArg<Bitmap>): TRet<{
   bits: Bitmap;
   points: FinderPoints;
-} {
+}> {
+  const bm = b as Bitmap;
   let bl, tl, tr;
   try {
-    ({ bl, tl, tr } = findFinder(b));
+    ({ bl, tl, tr } = findFinder(bm));
   } catch (e) {
     try {
-      b.negate();
-      ({ bl, tl, tr } = findFinder(b));
+      // ISO/IEC 18004:2024 §12 b)5 says to "reverse the colouring of the
+      // light and dark pixels" for reflectance reversal. `detect()` works on
+      // the `decodeQR()`-owned scratch bitmap, so keep the retry in-place for
+      // performance instead of cloning before this private/test-only helper.
+      bm.negate();
+      ({ bl, tl, tr } = findFinder(bm));
     } catch (e) {
-      b.negate(); // undo negate
+      bm.negate(); // undo negate
       throw e;
     }
   }
-  const moduleSize = (moduleSizeAvg(b, tl, tr) + moduleSizeAvg(b, tl, bl)) / 2;
+  const moduleSize = (moduleSizeAvg(bm, tl, tr) + moduleSizeAvg(bm, tl, bl)) / 2;
   if (moduleSize < 1.0) throw new Error(`invalid moduleSize = ${moduleSize}`);
   // Estimate size
   const tltr = int(distance(tl, tr) / moduleSize + 0.5);
   const tlbl = int(distance(tl, bl) / moduleSize + 0.5);
   let size = int((tltr + tlbl) / 2 + 7);
+  // QR side lengths are 21 + 4 * (version - 1), so normalize the estimate
+  // to the nearest size that is 1 modulo 4 before decoding the version.
   const rem = size % 4;
   if (rem === 0)
     size++; // -> 1
   else if (rem === 2)
     size--; // -> 1
   else if (rem === 3) size -= 2;
-  const version = info.size.decode(size);
-  validateVersion(version);
+  const version = utils.info.size.decode(size);
+  utils.validateVersion(version);
   let alignmentPattern;
-  if (info.alignmentPatterns(version).length > 0) {
+  if (utils.info.alignmentPatterns(version).length > 0) {
     // Bottom right estimate
     const br = { x: tr.x - tl.x + bl.x, y: tr.y - tl.y + bl.y };
-    const c = 1.0 - 3.0 / (info.size.encode(version) - 7);
+    const c = 1.0 - 3.0 / (utils.info.size.encode(version) - 7);
     // Estimated alignment pattern position
     const est = {
       x: int(tl.x + c * (br.x - tl.x)),
@@ -886,7 +931,7 @@ function detect(b: Bitmap): {
     };
     for (let i = 4; i <= 16; i <<= 1) {
       try {
-        alignmentPattern = findAlignment(b, est, i);
+        alignmentPattern = findAlignment(bm, est, i);
         break;
       } catch (e) {}
     }
@@ -904,14 +949,16 @@ function detect(b: Bitmap): {
     toBR = { x: size - 3.5, y: size - 3.5 };
   }
   const from: FinderPoints = [tl, tr, br, bl];
-  const bits = transform(b, size, from, [toTL, toTR, toBR, toBL]);
-  return { bits: bits, points: from };
+  const bits = transform(bm, size, from, [toTL, toTR, toBR, toBL]);
+  return { bits: bits as Bitmap, points: from } as TRet<{ bits: Bitmap; points: FinderPoints }>;
 }
 
 // Perspective transform by 4 points
 function squareToQuadrilateral(p: Point4) {
   const d3 = { x: p[0].x - p[1].x + p[2].x - p[3].x, y: p[0].y - p[1].y + p[2].y - p[3].y };
   if (d3.x === 0.0 && d3.y === 0.0) {
+    // Parallelogram fast path: perspective terms vanish, so the homography
+    // reduces to an affine transform.
     return [
       [p[1].x - p[0].x, p[2].x - p[1].x, p[0].x],
       [p[1].y - p[0].y, p[2].y - p[1].y, p[0].y],
@@ -932,10 +979,13 @@ function squareToQuadrilateral(p: Point4) {
 }
 
 // Transform quadrilateral to square by 4 points
-function transform(b: Bitmap, size: number, from: Point4, to: Point4): Bitmap {
+function transform(b: TArg<Bitmap>, size: number, from: Point4, to: Point4): TRet<Bitmap> {
+  const bm = b as Bitmap;
   // TODO: check
   // https://math.stackexchange.com/questions/13404/mapping-irregular-quadrilateral-to-a-rectangle
   const p = squareToQuadrilateral(to);
+  // Homographies are scale-invariant, so the adjugate is enough here;
+  // there is no need to divide by the determinant when inverting `p`.
   const qToS = [
     [
       p[1][1] * p[2][2] - p[2][1] * p[1][2],
@@ -959,7 +1009,7 @@ function transform(b: Bitmap, size: number, from: Point4, to: Point4): Bitmap {
   );
 
   const res = new Bitmap(size);
-  const points = fillArr(2 * size, 0);
+  const points = utils.fillArr(2 * size, 0);
   const pointsLength = points.length;
   for (let y = 0; y < size; y++) {
     const p = transform;
@@ -967,23 +1017,28 @@ function transform(b: Bitmap, size: number, from: Point4, to: Point4): Bitmap {
       const x = i / 2 + 0.5;
       const y2 = y + 0.5;
       const den = p[2][0] * x + p[2][1] * y2 + p[2][2];
-      points[i] = int((p[0][0] * x + p[0][1] * y2 + p[0][2]) / den);
-      points[i + 1] = int((p[1][0] * x + p[1][1] * y2 + p[1][2]) / den);
+      // ISO/IEC 18004:2024 §12 h) maps sampling grid intersections back to
+      // image coordinates before deciding dark/light state. Clip projected
+      // coordinates before `int()` because `>>> 0` wraps negative samples to a
+      // huge uint32 and would clamp them to the far image edge.
+      points[i] = int(cap((p[0][0] * x + p[0][1] * y2 + p[0][2]) / den, 0, bm.width - 1));
+      points[i + 1] = int(cap((p[1][0] * x + p[1][1] * y2 + p[1][2]) / den, 0, bm.height - 1));
     }
     for (let i = 0; i < pointsLength; i += 2) {
-      const px = cap(points[i], 0, b.width - 1);
-      const py = cap(points[i + 1], 0, b.height - 1);
-      if (b.get(px, py)) res.set((i / 2) | 0, y, true);
+      if (bm.get(points[i], points[i + 1])) res.set((i / 2) | 0, y, true);
     }
   }
-  return res;
+  return res as TRet<Bitmap>;
 }
 
 // Same as in drawTemplate, but reading
 // TODO: merge in CoderType?
-function readInfoBits(b: Bitmap) {
-  const readBit = (x: number, y: number, out: number) => (out << 1) | (b.get(x, y) ? 1 : 0);
-  const size = b.height;
+function readInfoBits(b: TArg<Bitmap>) {
+  const bm = b as Bitmap;
+  // Walk each reserved copy from the highest-numbered module back to module 0
+  // so the shift accumulator rebuilds the canonical bit string from MSB to LSB.
+  const readBit = (x: number, y: number, out: number) => (out << 1) | (bm.get(x, y) ? 1 : 0);
+  const size = bm.height;
   // Version information
   let version1 = 0;
   for (let y = 5; y >= 0; y--)
@@ -1004,45 +1059,48 @@ function readInfoBits(b: Bitmap) {
   return { version1, version2, format1, format2 };
 }
 
-function parseInfo(b: Bitmap) {
+function parseInfo(b: TArg<Bitmap>) {
+  const bm = b as Bitmap;
   // Population count over xor -> hamming distance
-  const size = b.height;
-  const { version1, version2, format1, format2 } = readInfoBits(b);
+  const size = bm.height;
+  const { version1, version2, format1, format2 } = readInfoBits(bm);
   // Guess format
   let format;
-  const bestFormat = best<{ ecc: ErrorCorrection; mask: Mask }>();
+  const bestFormat = utils.best<{ ecc: ErrorCorrection; mask: Mask }>();
   for (const ecc of ['medium', 'low', 'high', 'quartile'] as const) {
     for (let mask: Mask = 0; mask < 8; mask++) {
-      const bits = info.formatBits(ecc, mask as Mask);
+      const bits = utils.info.formatBits(ecc, mask as Mask);
       const cur = { ecc, mask: mask as Mask };
       if (bits === format1 || bits === format2) {
         format = cur;
         break;
       }
-      bestFormat.add(popcnt(format1 ^ bits), cur);
-      if (format1 !== format2) bestFormat.add(popcnt(format2 ^ bits), cur);
+      bestFormat.add(utils.popcnt(format1 ^ bits), cur);
+      if (format1 !== format2) bestFormat.add(utils.popcnt(format2 ^ bits), cur);
     }
   }
   if (format === undefined && bestFormat.score() <= MAX_BITS_ERROR) format = bestFormat.get();
   if (format === undefined) throw new Error('invalid format pattern');
-  let version: number | undefined = info.size.decode(size); // Guess version based on bitmap size
-  if (version < 7) validateVersion(version);
+  let version: number | undefined = utils.info.size.decode(size); // Guess version based on bitmap size
+  // Versions 1-6 do not carry version-information words, so side length is
+  // the only authoritative version source until version 7 adds those fields.
+  if (version < 7) utils.validateVersion(version);
   else {
     version = undefined;
     // Guess version
-    const bestVer = best<number>();
+    const bestVer = utils.best<number>();
     for (let ver = 7; ver <= 40; ver++) {
-      const bits = info.versionBits(ver);
+      const bits = utils.info.versionBits(ver);
       if (bits === version1 || bits === version2) {
         version = ver;
         break;
       }
-      bestVer.add(popcnt(version1 ^ bits), ver);
-      if (version1 !== version2) bestVer.add(popcnt(version2 ^ bits), ver);
+      bestVer.add(utils.popcnt(version1 ^ bits), ver);
+      if (version1 !== version2) bestVer.add(utils.popcnt(version2 ^ bits), ver);
     }
     if (version === undefined && bestVer.score() <= MAX_BITS_ERROR) version = bestVer.get();
     if (version === undefined) throw new Error('invalid version pattern');
-    if (info.size.encode(version) !== size) throw new Error('invalid version size');
+    if (utils.info.size.encode(version) !== size) throw new Error('invalid version size');
   }
   return { version, ...format };
 }
@@ -1051,7 +1109,10 @@ function parseInfo(b: Bitmap) {
 // See https://github.com/microsoft/TypeScript/issues/31535
 declare const TextDecoder: any;
 
-// Common encodings, please open issue if something popular missing
+// ISO/IEC 18004:2024 §7.4.3.2 says each ECI is a "6-digit assignment
+// number"; §7.4.3.4 says invoked ECIs apply until "a change of ECI".
+// Decode through platform TextDecoder only: unsupported labels may throw on
+// some runtimes, and callers needing them can provide a custom textDecoder.
 const eciToEncoding: Record<number, string> = {
   1: 'iso-8859-1',
   2: 'ibm437',
@@ -1081,38 +1142,42 @@ const eciToEncoding: Record<number, string> = {
   30: 'euc-kr',
 };
 
-function decodeWithEci(bytes: Uint8Array, eci: number = 26): string {
+function decodeWithEci(bytes: TArg<Uint8Array>, eci: number = 26): string {
+  // ISO/IEC 18004:2024 §7.3.2 says QR's "default interpretation" is
+  // "ECI 000003 representing the ISO/IEC 8859-1 character set". Keep UTF-8
+  // here so this library's UTF-8 byte-mode encoder round-trips without ECI.
   const encoding = eciToEncoding[eci];
   if (!encoding) throw new Error(`Unsupported ECI: ${eci}`);
   return new TextDecoder(encoding).decode(bytes);
 }
 
 function decodeBitmap(
-  b: Bitmap,
-  decoder: (bytes: Uint8Array, eci: number) => string = decodeWithEci
+  b: TArg<Bitmap>,
+  decoder: TArg<(bytes: Uint8Array, eci: number) => string> = decodeWithEci
 ): string {
-  const size = b.height;
-  if (size < 21 || (size & 0b11) !== 1 || size !== b.width)
+  const bm = b as Bitmap;
+  const size = bm.height;
+  if (size < 21 || (size & 0b11) !== 1 || size !== bm.width)
     throw new Error(`decode: invalid size=${size}`);
-  const { version, mask, ecc } = parseInfo(b);
-  const tpl = drawTemplate(version, ecc, mask);
-  const { total } = info.capacity(version, ecc);
+  const { version, mask, ecc } = parseInfo(bm);
+  const tpl = utils.drawTemplate(version, ecc, mask);
+  const { total } = utils.info.capacity(version, ecc);
   const bytes = new Uint8Array(total);
   let pos = 0;
   let buf = 0;
   let bitPos = 0;
-  zigzag(tpl, mask, (x, y, m) => {
+  utils.zigzag(tpl, mask, (x, y, m) => {
     bitPos++;
     buf <<= 1;
-    buf |= +(!!b.get(x, y) !== m);
+    buf |= +(!!bm.get(x, y) !== m);
     if (bitPos !== 8) return;
     bytes[pos++] = buf;
     bitPos = 0;
     buf = 0;
   });
   if (pos !== total) throw new Error(`decode: pos=${pos}, total=${total}`);
-  let bits = Array.from(interleave(version, ecc).decode(bytes))
-    .map((i) => bin(i, 8))
+  let bits = Array.from(utils.interleave(version, ecc).decode(bytes))
+    .map((i) => utils.bin(i, 8))
     .join('');
   // Reverse operation of index.ts/encode working on bits
   const readBits = (n: number) => {
@@ -1132,6 +1197,9 @@ function decodeBitmap(
     '1000': 'kanji',
   };
   let res = '';
+  // ISO/IEC 18004:2024 §7.3.2 defines no-ECI byte data as ECI 000003
+  // / ISO-8859-1. Keep ECI 26 for compatibility with legacy no-ECI UTF-8
+  // payloads and with encodeQR's UTF-8 byte-mode default.
   let eci: number = 26; // Default to utf-8 for compat with old behavior
   while (true) {
     if (bits.length < 4) break;
@@ -1139,7 +1207,7 @@ function decodeBitmap(
     const mode = modes[modeBits];
     if (mode === undefined) throw new Error(`Unknown modeBits=${modeBits} res="${res}"`);
     if (mode === 'terminator') break;
-    const countBits = info.lengthBits(version, mode);
+    const countBits = utils.info.lengthBits(version, mode);
     let count = toNum(readBits(countBits));
     if (mode === 'numeric') {
       while (count >= 3) {
@@ -1160,10 +1228,10 @@ function decodeBitmap(
     } else if (mode === 'alphanumeric') {
       while (count >= 2) {
         const v = toNum(readBits(11));
-        res += info.alphabet.alphanumerc.encode([Math.floor(v / 45), v % 45]).join('');
+        res += utils.info.alphabet.alphanumerc.encode([Math.floor(v / 45), v % 45]).join('');
         count -= 2;
       }
-      if (count === 1) res += info.alphabet.alphanumerc.encode([toNum(readBits(6))]).join('');
+      if (count === 1) res += utils.info.alphabet.alphanumerc.encode([toNum(readBits(6))]).join('');
     } else if (mode === 'eci') {
       const first = toNum(readBits(8));
       if ((first & 0x80) === 0) eci = first;
@@ -1174,6 +1242,12 @@ function decodeBitmap(
       const data = new Uint8Array(count);
       for (let i = 0; i < count; i++) data[i] = toNum(readBits(8));
       res += decoder(data, eci);
+    } else if (mode === 'kanji') {
+      // ISO/IEC 18004:2024 §7.3.6 says Kanji mode uses Shift JIS and
+      // "Each two-byte character value is compacted to a 13-bit binary
+      // codeword." Keep it unsupported until a real interop fixture can verify
+      // the 13-bit-to-Shift-JIS mapping rather than adding untested decoding.
+      throw new Error('Kanji mode is not supported');
     } else throw new Error(`Unknown mode=${mode}`);
   }
   return res;
@@ -1185,36 +1259,52 @@ export type DecodeOpts = {
   cropToSquare?: boolean;
   /**
    * Custom byte-to-text decoder used for byte segments.
-   * @param bytes - Byte segment to decode.
-   * @returns Decoded text.
+   *
+   * Receives the byte segment and, when needed, the active ECI designator.
+   * ISO/IEC 18004:2024 §7.4.3.4 keeps ECIs active "until the end of
+   * the encoded data or a change of ECI", so callers need the active
+   * designator to apply their own charset policy.
+   * @param bytes - Byte segment payload to decode.
+   * @param eci - Active ECI designator for the byte segment.
+   * @returns Decoded text for the byte segment.
    */
-  textDecoder?: (bytes: Uint8Array) => string;
+  textDecoder?: TArg<(bytes: Uint8Array, eci?: number) => string>;
   /**
    * Callback invoked with finder/alignment points after detection succeeds.
+   *
+   * Receives finder and alignment points returned by the detector.
    * @param points - Finder and alignment points returned by the detector.
    */
   pointsOnDetect?: (points: FinderPoints) => void;
   /**
    * Callback invoked with the grayscale bitmap that the detector sees.
+   *
+   * Receives the grayscale image generated during bitmap conversion.
    * @param img - Grayscale image generated during bitmap conversion.
    */
   imageOnBitmap?: (img: Image) => void;
   /**
    * Callback invoked with the perspective-corrected QR image.
+   *
+   * Receives the perspective-corrected QR image.
    * @param img - Perspective-corrected QR image.
    */
   imageOnDetect?: (img: Image) => void;
   /**
    * Callback invoked with the final decoded QR image.
+   *
+   * Receives the final QR image used to decode the payload.
    * @param img - Final QR image used to decode the payload.
    */
   imageOnResult?: (img: Image) => void;
 };
 
-// Creates square from rectangle
-function cropToSquare(img: Image) {
-  const data = Array.isArray(img.data) ? new Uint8Array(img.data) : img.data;
-  const { height, width } = img;
+// Center-crop to a square and return the original-image offset so
+// `decodeQR()` can map detected points back into caller coordinates.
+function cropToSquare(img: TArg<Image>) {
+  const image = img as Image;
+  const data = Array.isArray(image.data) ? new Uint8Array(image.data) : image.data;
+  const { height, width } = image;
   const squareSize = Math.min(height, width);
   const offset = {
     x: Math.floor((width - squareSize) / 2),
@@ -1247,32 +1337,43 @@ function cropToSquare(img: Image) {
  * const text = decodeQR(bm.toImage());
  * ```
  */
-export function decodeQR(img: Image, opts: DecodeOpts = {}): string {
+export function decodeQR(img: TArg<Image>, opts: TArg<DecodeOpts> = {}): string {
+  let image = img as Image;
+  const options = opts as DecodeOpts;
   for (const field of ['height', 'width'] as const) {
-    if (!Number.isSafeInteger(img[field]) || img[field] <= 0)
-      throw new Error(`invalid img.${field}=${img[field]} (${typeof img[field]})`);
+    if (!Number.isSafeInteger(image[field]) || image[field] <= 0)
+      throw new Error(`invalid img.${field}=${image[field]} (${typeof image[field]})`);
   }
-  const { data } = img;
+  const { data } = image;
   if (!Array.isArray(data) && !isBytes(data))
     throw new Error(`invalid image.data=${data} (${typeof data})`);
-  if (opts.cropToSquare !== undefined && typeof opts.cropToSquare !== 'boolean')
-    throw new Error(`invalid opts.cropToSquare=${opts.cropToSquare}`);
-  for (const fn of ['pointsOnDetect', 'imageOnBitmap', 'imageOnDetect', 'imageOnResult'] as const) {
-    if (opts[fn] !== undefined && typeof opts[fn] !== 'function')
-      throw new Error(`invalid opts.${fn}=${opts[fn]} (${typeof opts[fn]})`);
+  if (options.cropToSquare !== undefined && typeof options.cropToSquare !== 'boolean')
+    throw new Error(`invalid opts.cropToSquare=${options.cropToSquare}`);
+  // Validate callbacks before decoding so payload mode does not decide whether
+  // an invalid public option is accepted.
+  for (const fn of [
+    'textDecoder',
+    'pointsOnDetect',
+    'imageOnBitmap',
+    'imageOnDetect',
+    'imageOnResult',
+  ] as const) {
+    if (options[fn] !== undefined && typeof options[fn] !== 'function')
+      throw new Error(`invalid opts.${fn}=${options[fn]} (${typeof options[fn]})`);
   }
   let offset = { x: 0, y: 0 };
-  if (opts.cropToSquare) ({ img, offset } = cropToSquare(img));
-  const bmp = toBitmap(img);
-  if (opts.imageOnBitmap) opts.imageOnBitmap(bmp.toImage());
+  if (options.cropToSquare) ({ img: image, offset } = cropToSquare(image));
+  const bmp = toBitmap(image) as Bitmap;
+  if (options.imageOnBitmap) options.imageOnBitmap(bmp.toImage());
   const { bits, points } = detect(bmp);
-  if (opts.pointsOnDetect) {
+  if (options.pointsOnDetect) {
+    // Report finder points in the caller's original coordinate space after any center-crop.
     const p = points.map((i) => ({ ...i, ...pointAdd(i, offset) })) as FinderPoints;
-    opts.pointsOnDetect(p);
+    options.pointsOnDetect(p);
   }
-  if (opts.imageOnDetect) opts.imageOnDetect(bits.toImage());
-  const res = decodeBitmap(bits, opts.textDecoder);
-  if (opts.imageOnResult) opts.imageOnResult(bits.toImage());
+  if (options.imageOnDetect) options.imageOnDetect(bits.toImage());
+  const res = decodeBitmap(bits, options.textDecoder);
+  if (options.imageOnResult) options.imageOnResult(bits.toImage());
   return res;
 }
 
@@ -1294,15 +1395,25 @@ export function decodeQR(img: Image, opts: DecodeOpts = {}): string {
  */
 export default decodeQR;
 
+// Additional private helpers for focused regression tests; separate from the
+// existing `_tests` object so its current keys remain stable.
+export const _TESTS: {
+  findAlignment: typeof findAlignment;
+  transform: typeof transform;
+} = /* @__PURE__ */ Object.freeze({
+  findAlignment: findAlignment,
+  transform: transform,
+});
+
 // Unsafe API utils, exported only for tests
 export const _tests: {
   toBitmap: typeof toBitmap;
   decodeBitmap: typeof decodeBitmap;
   findFinder: typeof findFinder;
   detect: typeof detect;
-} = {
+} = /* @__PURE__ */ Object.freeze({
   toBitmap,
   decodeBitmap,
   findFinder,
   detect,
-};
+});

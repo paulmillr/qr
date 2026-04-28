@@ -24,7 +24,7 @@ limitations under the License.
  */
 
 import decodeQR, { type DecodeOpts, type FinderPoints } from './decode.ts';
-import type { Image } from './index.ts';
+import type { Image, TArg, TRet } from './index.ts';
 
 /**
  * Read rendered element dimensions from computed CSS.
@@ -34,8 +34,10 @@ import type { Image } from './index.ts';
  * Read rendered element dimensions from computed CSS.
  * ```ts
  * import { getSize } from 'qr/dom.js';
- * const video = document.querySelector('video')!;
- * const { width, height } = getSize(video);
+ * if (typeof document !== 'undefined') {
+ *   const video = document.querySelector('video')!;
+ *   void getSize(video);
+ * }
  * ```
  */
 export const getSize = (
@@ -83,10 +85,16 @@ export type QRCanvasOpts = {
   cropToSquare: boolean;
   /**
    * Custom byte-to-text decoder used for byte segments.
-   * @param bytes - Byte segment to decode.
-   * @returns Decoded text.
+   *
+   * Receives the byte segment and, when needed, the active ECI designator.
+   * ISO/IEC 18004:2024 §7.4.3.4 keeps ECIs active "until the end of
+   * the encoded data or a change of ECI"; `QRCanvas` forwards this into
+   * `decodeQR()`, so keep the same optional ECI argument here.
+   * @param bytes - Byte segment payload to decode.
+   * @param eci - Active ECI designator for the byte segment.
+   * @returns Decoded text for the byte segment.
    */
-  textDecoder?: (bytes: Uint8Array) => string;
+  textDecoder?: TArg<(bytes: Uint8Array, eci?: number) => string>;
 };
 
 /** Optional output canvases used by `QRCanvas`. */
@@ -100,14 +108,17 @@ export type QRCanvasElements = {
 };
 /**
  * Handles canvases for QR code decoding.
- * @param elements - Optional output canvases used for overlays and previews. See {@link QRCanvasElements}.
+ * @param elements - Optional output canvases. See {@link QRCanvasElements}.
  * @param opts - Drawing and decode options for the helper canvases. See {@link QRCanvasOpts}.
  * @example
  * Create a `QRCanvas` that paints overlay highlights onto a DOM canvas.
  * ```ts
  * import { QRCanvas } from 'qr/dom.js';
- * const overlay = document.createElement('canvas');
- * const canvas = new QRCanvas({ overlay });
+ * if (typeof document !== 'undefined') {
+ *   const overlay = document.createElement('canvas');
+ *   const canvas = new QRCanvas({ overlay });
+ *   void canvas;
+ * }
  * ```
  */
 export class QRCanvas {
@@ -139,6 +150,8 @@ export class QRCanvas {
     }
   }
   private setSize(height: number, width: number) {
+    // `resultQR` is resized in `drawResultQr()` because it tracks the decoded
+    // QR image size, not the current source frame dimensions.
     setCanvasSize(this.main.canvas, height, width);
     if (this.overlay) setCanvasSize(this.overlay.canvas, height, width);
     if (this.bitmap) setCanvasSize(this.bitmap.canvas, height, width);
@@ -148,9 +161,11 @@ export class QRCanvas {
     const imgData = new ImageData(Uint8ClampedArray.from(data), width, height);
     let offset = { x: 0, y: 0 };
     if (this.opts.cropToSquare) {
+      // Match `decodeQR()`'s center-crop offset so the bitmap debug view
+      // stays aligned with detected points remapped into the source frame.
       offset = {
-        x: Math.ceil((this.bitmap.canvas.width - width) / 2),
-        y: Math.ceil((this.bitmap.canvas.height - height) / 2),
+        x: Math.floor((this.bitmap.canvas.width - width) / 2),
+        y: Math.floor((this.bitmap.canvas.height - height) / 2),
       };
     }
     this.bitmap.context.putImageData(imgData, offset.x, offset.y);
@@ -161,6 +176,9 @@ export class QRCanvas {
     setCanvasSize(this.resultQR.canvas, height, width);
     const imgData = new ImageData(Uint8ClampedArray.from(data), width, height);
     this.resultQR.context.putImageData(imgData, 0, 0);
+    // The result canvas owns these inline rendering/layout styles: CSS Images
+    // defines `image-rendering: pixelated`, and scaled QR modules become hard
+    // to read with default smoothing. Use class/id CSS for unrelated styling.
     (this.resultQR.canvas as any).style = `image-rendering: pixelated; width: ${
       blockSize * width
     }px; height: ${blockSize * height}px`;
@@ -180,12 +198,16 @@ export class QRCanvas {
       // Clear only central part (flickering)
       ctx.clearRect(offset.x, offset.y, squareSize, squareSize);
       ctx.fillStyle = this.opts.overlaySideColor;
+      // Trailing sidebars start where the floor-centered crop ends; odd
+      // remainders put the extra pixel on the trailing side.
       if (width > height) {
+        const right = offset.x + squareSize;
         ctx.fillRect(0, 0, offset.x, height); // left
-        ctx.fillRect(width - offset.x, 0, offset.x, height); // right
+        ctx.fillRect(right, 0, width - right, height); // right
       } else if (height > width) {
+        const bottom = offset.y + squareSize;
         ctx.fillRect(0, 0, width, offset.y); // top
-        ctx.fillRect(0, height - offset.y, width, offset.y); // bottom
+        ctx.fillRect(0, bottom, width, height - bottom); // bottom
       }
     } else {
       ctx.clearRect(0, 0, width, height);
@@ -230,6 +252,9 @@ export class QRCanvas {
       this.lastDetect = Date.now();
       return res;
     } catch (e) {
+      // Camera-frame decoding is fail-soft UI policy: README says "even if
+      // one frame fails, the next frame can succeed", so decode hook errors
+      // are treated as frame misses here instead of breaking the loop.
       if (this.overlay && Date.now() - this.lastDetect > this.opts.overlayTimeout)
         this.drawOverlay();
     }
@@ -254,6 +279,7 @@ class QRCamera {
   private setStream(stream: MediaStream) {
     this.stream = stream;
     const { player } = this;
+    // Keep camera preview autoplaying inline on mobile before attaching the stream.
     player.setAttribute('autoplay', '');
     player.setAttribute('muted', '');
     player.setAttribute('playsinline', '');
@@ -284,6 +310,10 @@ class QRCamera {
    * @param deviceId - devideId from '.listDevices'
    */
   async setDevice(deviceId: string): Promise<void> {
+    // Stop-first is intentional for camera switching: WPT's Media Capture
+    // `GUM-deny` and `GUM-impossible-constraint` tests show getUserMedia()
+    // can reject, but this DOM helper prioritizes releasing constrained
+    // camera hardware before requesting the replacement stream.
     this.stop();
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { deviceId: { exact: deviceId } },
@@ -292,6 +322,8 @@ class QRCamera {
   }
   readFrame(canvas: QRCanvas, fullSize = false): string | undefined {
     const { player } = this;
+    // Default to the rendered player box so overlay coordinates stay aligned
+    // with the on-screen preview; `fullSize` opts into intrinsic frame pixels.
     if (fullSize) return canvas.drawImage(player, player.videoHeight, player.videoWidth);
     const size = getSize(player);
     return canvas.drawImage(player, size.height, size.width);
@@ -308,25 +340,28 @@ class QRCamera {
  * Create a camera helper and read frames into a `QRCanvas`.
  * ```ts
  * import { QRCanvas, frontalCamera } from 'qr/dom.js';
- * const player = document.querySelector('video')!;
- * const canvas = new QRCanvas();
- * const camera = await frontalCamera(player);
- * camera.readFrame(canvas);
- * camera.stop();
+ * if (typeof document !== 'undefined') {
+ *   const player = document.querySelector('video')!;
+ *   const canvas = new QRCanvas();
+ *   const camera = await frontalCamera(player);
+ *   camera.readFrame(canvas);
+ *   camera.stop();
+ * }
  * ```
  */
-export async function frontalCamera(player: HTMLVideoElement): Promise<QRCamera> {
+export async function frontalCamera(player: HTMLVideoElement): Promise<TRet<QRCamera>> {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
       // Ask for screen resolution
       height: { ideal: window.screen.height },
       width: { ideal: window.screen.width },
-      // prefer front-facing camera, but can use any other
-      // NOTE: 'exact' will cause OverConstrained error if no frontal camera available
+      // Media Capture names the screen/user-facing camera "user" and the
+      // world-facing camera "environment". This helper intentionally treats the
+      // phone's camera side as "frontal", since it is the main QR scanning side.
       facingMode: 'environment',
     },
   });
-  return new QRCamera(stream, player);
+  return new QRCamera(stream, player) as TRet<QRCamera>;
 }
 
 /**
@@ -337,15 +372,19 @@ export async function frontalCamera(player: HTMLVideoElement): Promise<QRCamera>
  * Run a callback on every animation frame until cancelled.
  * ```ts
  * import { frameLoop } from 'qr/dom.js';
- * const cancel = frameLoop(() => {
- *   document.body.dataset.frame = '1';
- * });
- * cancel();
+ * if (typeof requestAnimationFrame !== 'undefined') {
+ *   const cancel = frameLoop(() => {});
+ *   cancel();
+ * }
  * ```
  */
 export function frameLoop(cb: FrameRequestCallback): () => void {
   let handle: number | undefined = undefined;
   function loop(ts: number) {
+    // HTML `AnimationFrameProvider` IDL defines `FrameRequestCallback` as
+    // `undefined (DOMHighResTimeStamp time)`. The returned canceller is for the
+    // scheduled handle between frames, not self-cancel from inside `cb`, because
+    // this loop requests the next frame only after `cb` returns.
     cb(ts);
     handle = requestAnimationFrame(loop);
   }
@@ -368,7 +407,10 @@ export function frameLoop(cb: FrameRequestCallback): () => void {
  * ```ts
  * import { svgToPng } from 'qr/dom.js';
  * const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>';
- * const pngUrl = await svgToPng(svg, 256, 256);
+ * if (typeof DOMParser !== 'undefined' && typeof document !== 'undefined') {
+ *   const pngUrl = await svgToPng(svg, 256, 256);
+ *   void pngUrl;
+ * }
  * ```
  */
 export function svgToPng(svgData: string, width: number, height: number): Promise<string> {
@@ -401,7 +443,10 @@ export function svgToPng(svgData: string, width: number, height: number): Promis
     const source = serializer.serializeToString(doc);
 
     const img = new Image();
-    img.src = 'data:image/svg+xml,' + encodeURIComponent(source);
+    // HTMLImageElement IDL exposes `src` as the URL attribute and `onload` /
+    // `onerror` as EventHandler attributes. Register handlers before mutating
+    // `src` so a fast image implementation cannot complete before listeners
+    // exist.
     img.onload = function () {
       const canvas = document.createElement('canvas');
       canvas.width = width;
@@ -413,6 +458,7 @@ export function svgToPng(svgData: string, width: number, height: number): Promis
       resolve(dataUrl);
     };
     img.onerror = reject;
+    img.src = 'data:image/svg+xml,' + encodeURIComponent(source);
   });
 }
 
@@ -425,11 +471,14 @@ export function svgToPng(svgData: string, width: number, height: number): Promis
  * Convert GIF bytes into a PNG blob in browser environments.
  * ```ts
  * import { gifToPng } from 'qr/dom.js';
- * const gif = new Uint8Array(await (await fetch('/qr.gif')).arrayBuffer());
- * const png = await gifToPng(gif);
+ * if (typeof window !== 'undefined') {
+ *   const gif = new Uint8Array(await (await fetch('/qr.gif')).arrayBuffer());
+ *   const png = await gifToPng(gif);
+ *   void png;
+ * }
  * ```
  */
-export async function gifToPng(gifBytes: Uint8Array): Promise<Blob> {
+export async function gifToPng(gifBytes: TArg<Uint8Array>): Promise<Blob> {
   const blob = new Blob([gifBytes as BufferSource], { type: 'image/gif' });
   const bitmap = await createImageBitmap(blob);
   try {
@@ -439,6 +488,7 @@ export async function gifToPng(gifBytes: Uint8Array): Promise<Blob> {
     ctx.transferFromImageBitmap(bitmap);
     return await canvas.convertToBlob({ type: 'image/png' });
   } finally {
+    // Release the decoded bitmap even when context creation or PNG encoding fails.
     bitmap.close();
   }
 }

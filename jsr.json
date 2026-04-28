@@ -7,12 +7,7 @@
     "./dom.js": "./src/dom.ts"
   },
   "publish": {
-    "include": [
-      "src",
-      "jsr.json",
-      "LICENSE",
-      "README.md"
-    ]
+    "include": ["src", "jsr.json", "LICENSE", "README.md"]
   },
   "license": "MIT"
 }

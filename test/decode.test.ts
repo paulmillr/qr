@@ -1,9 +1,19 @@
 import { should } from '@paulmillr/jsbt/test.js';
-import { deepStrictEqual } from 'node:assert';
+import { deepStrictEqual, throws } from 'node:assert';
 import { readdirSync, statSync } from 'node:fs';
 import { join as pjoin } from 'node:path';
-import readQR, { _tests } from '../src/decode.ts';
+import readQR, { _TESTS, _tests, type DecodeOpts } from '../src/decode.ts';
+import { Bitmap, encodeQR } from '../src/index.ts';
 import { DETECTION_PATH, readJPEG } from './utils.ts';
+
+const textDecoderWithEci: DecodeOpts = {
+  textDecoder: (bytes, eci) => new TextDecoder().decode(bytes) + (eci?.toString() || ''),
+};
+const textDecoderWithoutEci: DecodeOpts = {
+  textDecoder: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
+};
+void textDecoderWithEci;
+void textDecoderWithoutEci;
 
 function parseCoordinates(c) {
   const qrSize = 4 * 2;
@@ -84,7 +94,7 @@ should('Detector', () => {
   deepStrictEqual(points, [
     { x: 361, y: 551.5, moduleSize: 5.42857142857143, count: 6 },
     { x: 482, y: 559, moduleSize: 5.571428571428571, count: 2 },
-    { x: 458, y: 652, moduleSize: 2.2857142857142856, count: 2 },
+    { x: 458, y: 652, moduleSize: 5.333333333333333, count: 2 },
     { x: 357.5, y: 659.5, moduleSize: 5.142857142857143, count: 2 },
   ]);
 });
@@ -95,6 +105,106 @@ should('Decode', () => {
   const { bits } = _tests.detect(bmp);
   const res = _tests.decodeBitmap(bits);
   deepStrictEqual(res, 'https://www.surveymonkey.com/s/TheClubatLAS_T3');
+});
+
+should('decodeQR validates textDecoder option before decoding', () => {
+  const raw = encodeQR('12345', 'raw', { version: 1, encoding: 'numeric' });
+  const img = new Bitmap(raw.length, raw).scale(2).toImage();
+  throws(
+    () => readQR(img, { textDecoder: 1 as never }),
+    new Error('invalid opts.textDecoder=1 (number)')
+  );
+});
+
+const alignmentBitmap = () => {
+  const width = 7;
+  const center = 3;
+  const rows = Array.from({ length: width }, () => Array(width).fill(false));
+  for (let y = 1; y < 6; y++) {
+    for (let x = 1; x < 6; x++) rows[y][x] = true;
+  }
+  for (let y = 2; y < 5; y++) {
+    for (let x = 2; x < 5; x++) rows[y][x] = false;
+  }
+  rows[center][center] = true;
+  return { bmp: new Bitmap({ width, height: width }, rows), center };
+};
+
+should('findAlignment includes exact search window edge', () => {
+  const { findAlignment } = _TESTS;
+  const { bmp, center } = alignmentBitmap();
+  const res = findAlignment(bmp, { x: center, y: center, moduleSize: 1, count: 1 }, 2);
+  deepStrictEqual(res, { x: 3.5, y: 3.5, moduleSize: 1, count: 1 });
+});
+
+should('transform clamps projected samples before truncation', () => {
+  const { transform } = _TESTS;
+  const bmp = new Bitmap({ width: 2, height: 2 }, [
+    [true, false],
+    [false, false],
+  ]);
+  const out = transform(
+    bmp,
+    2,
+    [
+      { x: -2, y: -2 },
+      { x: 0, y: -2 },
+      { x: 0, y: 0 },
+      { x: -2, y: 0 },
+    ],
+    [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 2, y: 2 },
+      { x: 0, y: 2 },
+    ]
+  );
+  deepStrictEqual(out.toRaw(), [
+    [true, true],
+    [true, true],
+  ]);
+});
+
+should('toBitmap clamps trailing partial block origins', () => {
+  const width = 41;
+  const height = 41;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  let seed = 1;
+  const rnd = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed >>> 24;
+  };
+  for (let i = 0; i < rgba.length; i += 4) {
+    const v = rnd();
+    rgba[i] = v;
+    rgba[i + 1] = (v * 3 + i) & 0xff;
+    rgba[i + 2] = (255 - v + (i >>> 2)) & 0xff;
+    rgba[i + 3] = 255;
+  }
+  const ascii = [
+    '█ █▄   █ ▄▀▄█▀█ ▀▄ ▀▀▀▄ █▀ ▀▄█  ▀▀█▄▀█▄▀▀',
+    '█▄▀▄ ▄▀   ▀█▄ █▀▀  ▄▄▄▀▀▄▄  ▄▀▀▀▄▄▀▀█▄█ ▀',
+    '▀ █▀█▄  █▄███▄ ▀▀███ ▀▄ ▄██▀█▄▀▄▀▄▀ ▄▄▄▄█',
+    '▀█▄ ▀▄█▀▀██  █▀▀▀▄▀▄█▄█▄ ▀▄▄  █  ▀▀█ █▄▄▀',
+    '█▄█▀█▄▀███ █▀▀▄▄▄██▀▄▀▀█ ▀▀▀▀██▀▀▄▄█▀ ▀█▀',
+    ' ▀▀█ ▀█▀▄▄ ▀█▀▀▀▀▀▀▀▀▀██▄▄ ██  ▀ █ ▀▄ █▄ ',
+    ' ▄█▄▄▀▀█▀▀▀▀█▀ ▀▄████▄  ▀▀█▄ ▄█ ▄ ▄█▄▄ ▄ ',
+    '█ █▄▄▄   ▄ ▀██▄▀▀ ▄▄▄█▀▀▄▄▄▄▄ ██▀▀  ▀ █▄▀',
+    '▄▀ ▀ ██ █▄▀▀ ▀▀ ▄▀ ▄ ▀▀█▀█   ▄▄█ ▄ ▄ ▀ ▄▄',
+    '▄ ▀███▀▄  ▀ ▀ ▄▀█ ▀▀▄█ █ ▀ ▀█ █  ▀█▀▀ █▄▄',
+    '▀▄▄ █▄▀██▄▀▄▀█▄█▄▄▄ ▀█▄▄▀▀▄██ ▄▄█▀▄▀▀█▀  ',
+    '▀ ▄▀▄  █  █▄▄▄▀  ▀▀█ ▀▀ ▄██▀ █ ▄█▄▀ ▀▀█▀ ',
+    '▄▄█▄▄▄███ ▀▄▀█ ▄▀▀  ██▀▄ ▄▄▀█ ▀▀▄██▄▀▀▄█ ',
+    '▀ ▄ ▀ █ ▄█▀█ ▀▀█▄█ █▀▄▀▀▄ ▄ █▀▄█▀ █▄▄ ▄█▀',
+    '█ ▀▀▀▄▄██ ▄█▄▄▄█▄▄▄█▀ █▄█▄▀▀▀ ▀▀ ██  ▀▄ ▀',
+    '▄▄▀▄██ ▀▀▄ ▀  ▀▄▀█▀█▀▀▀█████▄▄▄   ▄▀▀█▀ █',
+    '▄▄▄▀█▀  █▀▀█▀██▀█▀ ▀█▀▀ ▄  ▀███ ▀▄▄     █',
+    '▄ ▄▄▄ ▄█▀   ▄█▄█▄█▄▀▄█▀▄ ▄▄▀▀▄ █  █▀▀  ▀ ',
+    '▄ ▀██  ▄█▄▀▀▀█▄▄█ ▀  █▄███    ▄  ▄▀▀█▀ █ ',
+    '▄▀▄▀▄█  ▀▀▄ ▄ ▄   ▄▄ ▄▄▄▀████▀ █▀█ █▄█ ▄█',
+    '▀ ▀▀ ▀   ▀ ▀ ▀ ▀   ▀  ▀    ▀▀▀     ▀ ▀   ',
+  ].join('\n');
+  deepStrictEqual(_tests.toBitmap({ width, height, data: rgba }).toASCII(), `${ascii}\n`);
 });
 
 should('toBitmap: unaligned RGBA view matches aligned RGBA data', () => {
@@ -333,7 +443,9 @@ const DECODED = {
     'image063.jpg': [
       'http://www.postalexperience.com/pos?mt=4&sc=840-5940-0244-002-00006-80522-02',
     ],
-    'image064.jpg': ['http://www.postalexperience.com/pos?mt=4&sc=840-5940-0244-002-00006-80522-02'],
+    'image064.jpg': [
+      'http://www.postalexperience.com/pos?mt=4&sc=840-5940-0244-002-00006-80522-02',
+    ],
     'image065.jpg': ['GH69-28945C'],
   },
   noncompliant: {},
