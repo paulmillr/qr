@@ -1,6 +1,6 @@
 {
   "name": "qr",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "description": "Minimal 0-dep QR code generator & reader. Supports ascii, term, gif and svg formats",
   "files": [
     "index.js",
