@@ -1,10 +1,10 @@
-name: Run TS tests
+name: Run tests
 on:
   - push
   - pull_request
 jobs:
   test-ts:
-    name: 'jsbt v0.4.5' # Should match commit below
-    uses: paulmillr/jsbt/.github/workflows/test-ts.yml@570adcfe0ed96b477bb9b35400fb43fd9406fb47
+    name: jsbt v0.5.1
+    uses: paulmillr/jsbt/.github/workflows/test.yml@231cc389fe2f825b6531285ad8c275584bf76588
     with:
       runs-on: 'ubuntu-24.04'
