@@ -157,13 +157,38 @@ export interface Coder<F, T> {
   decode(to: T): F;
 }
 
+export function anumber(n: number, title: string): number {
+  if (typeof n !== 'number')
+    throw new TypeError(`"${title}" expected number, got type=${typeof n}`);
+  return n;
+}
+
+export function asafenumber(n: number, title: string): number {
+  anumber(n, title);
+  if (!Number.isSafeInteger(n))
+    throw new RangeError(`"${title}" expected safe integer, got ${n}`);
+  return n;
+}
+
+export function astring(s: string, title: string): string {
+  if (typeof s !== 'string')
+    throw new TypeError(`"${title}" expected string, got type=${typeof s}`);
+  return s;
+}
+
+export function validateObject<T>(object: TArg<T>, title: string): T {
+  if (object === null || typeof object !== 'object' || Array.isArray(object))
+    throw new TypeError(`"${title}" expected object, got type=${typeof object}`);
+  return object as T;
+}
+
 function assertNumber(n: number) {
   if (!Number.isSafeInteger(n)) throw new Error(`integer expected: ${n}`);
 }
 
 function validateVersion(ver: Version): void {
-  if (!Number.isSafeInteger(ver) || ver < 1 || ver > 40)
-    throw new Error(`Invalid version=${ver}. Expected number [1..40]`);
+  asafenumber(ver, 'ver');
+  if (ver < 1 || ver > 40) throw new RangeError(`Invalid version=${ver}. Expected number [1..40]`);
 }
 
 function bin(dec: number, pad: number): string {
@@ -348,10 +373,13 @@ type ReadFn = (c: Point, curr: DrawValue) => void;
 export class Bitmap {
   private static size(size: Size | number, limit?: Size) {
     if (typeof size === 'number') size = { height: size, width: size };
+    size = validateObject(size, 'size');
+    anumber(size.height, 'size.height');
+    anumber(size.width, 'size.width');
     if (!Number.isSafeInteger(size.height) && size.height !== Infinity)
-      throw new Error(`Bitmap: invalid height=${size.height} (${typeof size.height})`);
+      throw new RangeError(`Bitmap: invalid height=${size.height} (${typeof size.height})`);
     if (!Number.isSafeInteger(size.width) && size.width !== Infinity)
-      throw new Error(`Bitmap: invalid width=${size.width} (${typeof size.width})`);
+      throw new RangeError(`Bitmap: invalid width=${size.width} (${typeof size.width})`);
     if (limit !== undefined) {
       // Clamp length, so it won't overflow, also allows to use Infinity, so we draw until end
       size = {
@@ -361,7 +389,15 @@ export class Bitmap {
     }
     return size;
   }
+  private static point(p: Point, title: string): Point {
+    p = validateObject(p, title);
+    if (!('x' in p) || !('y' in p)) throw new TypeError(`Bitmap: "${title}" expected { x, y }`);
+    asafenumber(p.x, title + '.x');
+    asafenumber(p.y, title + '.y');
+    return p;
+  }
   static fromString(s: string): Bitmap {
+    astring(s, 's');
     // Remove linebreaks on start and end, so we draw in `` section
     // Fixture strings use LF-delimited rows of X / space / ? characters; callers
     // must normalize CRLF input before handing it to this debug parser.
@@ -413,7 +449,9 @@ export class Bitmap {
     this.fullWords = Math.floor(width / 32) | 0;
     this.value = new Uint32Array(this.words * height);
     this.defined = new Uint32Array(this.value.length);
-    if (data) {
+    if (data !== undefined) {
+      if (!Array.isArray(data))
+        throw new TypeError(`"data" expected array, got type=${typeof data}`);
       // accept same semantics as old version
       if (data.length !== height)
         throw new Error(`Bitmap: data height mismatch: exp=${height} got=${data.length}`);
@@ -426,6 +464,7 @@ export class Bitmap {
     }
   }
   point(p: Point): DrawValue {
+    p = Bitmap.point(p, 'p');
     // The storage docs above say "undefined is used as a marker whether cell
     // was written or not"; `point()` is the detector's dark-module read and
     // intentionally treats both undefined and false as not-dark. Use
@@ -434,17 +473,17 @@ export class Bitmap {
   }
   // Raw bounds check for scan loops; unlike `xy()`, this does not wrap or normalize coordinates.
   isInside(p: Point): boolean {
+    p = Bitmap.point(p, 'p');
     return 0 <= p.x && p.x < this.width && 0 <= p.y && p.y < this.height;
   }
   size(offset?: Point | number): { height: number; width: number } {
     if (!offset) return { height: this.height, width: this.width };
-    const { x, y } = this.xy(offset);
+    const { x, y } = this.xy(offset, 'offset');
     return { height: this.height - y, width: this.width - x };
   }
-  private xy(c: Point | number) {
+  private xy(c: Point | number, title = 'c') {
     if (typeof c === 'number') c = { x: c, y: c };
-    if (!Number.isSafeInteger(c.x)) throw new Error(`Bitmap: invalid x=${c.x}`);
-    if (!Number.isSafeInteger(c.y)) throw new Error(`Bitmap: invalid y=${c.y}`);
+    c = Bitmap.point(c, title);
     // Bitmap's class docs say "For most `draw` calls, structure is mutable";
     // coordinate objects follow that hot-path policy too and are normalized in place.
     c.x = mod(c.x, this.width);
@@ -586,8 +625,8 @@ export class Bitmap {
   border(border = 2, value: DrawValue): Bitmap {
     // `border` is used both as output-size delta and as embed coordinate; keep
     // it a positive safe integer before those paths allocate or normalize.
-    if (!Number.isSafeInteger(border) || border <= 0)
-      throw new Error(`Bitmap.border: invalid size=${border}`);
+    asafenumber(border, 'border');
+    if (border <= 0) throw new RangeError(`Bitmap.border: invalid size=${border}`);
     const height = this.height + 2 * border;
     const width = this.width + 2 * border;
     const out = new Bitmap({ height, width });
@@ -687,8 +726,8 @@ export class Bitmap {
   }
   // Each pixel size is multiplied by factor
   scale(factor: number): Bitmap {
-    if (!Number.isSafeInteger(factor) || factor > 1024)
-      throw new Error(`invalid scale factor: ${factor}`);
+    asafenumber(factor, 'factor');
+    if (factor <= 0 || factor > 1024) throw new RangeError(`invalid scale factor: ${factor}`);
     const { height, width } = this;
     // Bitmap storage docs say "undefined is used as a marker whether cell was
     // written or not"; `scale()` is an output materialization path and samples
@@ -722,11 +761,12 @@ export class Bitmap {
   countPatternInRow(y: number, patternLen: number, ...patterns: number[]): number {
     // Penalty scanning only passes Table 11 windows over bounded symbol rows;
     // validate this public helper before JS shifts / typed-array reads coerce bad inputs.
-    if (!Number.isSafeInteger(patternLen) || patternLen <= 0 || patternLen >= 32)
-      throw new Error('wrong patternLen');
+    asafenumber(y, 'y');
+    asafenumber(patternLen, 'patternLen');
+    if (patternLen <= 0 || patternLen >= 32) throw new RangeError('wrong patternLen');
     const mask = (1 << patternLen) - 1;
     const { height, width, value, words } = this;
-    if (!Number.isSafeInteger(y) || y < 0 || y >= height) return 0;
+    if (y < 0 || y >= height) return 0;
     let count = 0;
     const rowBase = this.wordIndex(0, y);
     for (let i = 0, window = 0; i < words; i++) {
@@ -750,7 +790,8 @@ export class Bitmap {
     // ISO/IEC 18004:2024 §7.8.3.1 N1 scans adjacent modules in bounded rows
     // and columns; validate this public helper before missing typed-array rows
     // are coerced into all-light runs by bitwise operators.
-    if (!Number.isSafeInteger(y) || y < 0 || y >= height) return;
+    asafenumber(y, 'y');
+    if (y < 0 || y >= height) return;
     let runLen = 0;
     let runValue: boolean | undefined;
     const rowBase = this.wordIndex(0, y);
@@ -785,7 +826,8 @@ export class Bitmap {
     const { height, width, words } = this;
     // ISO/IEC 18004:2024 §7.8.3.1 N2 counts 2 x 2 module blocks in bounded
     // rows; reject non-integer scan rows before bitwise coercions truncate them.
-    if (width < 2 || !Number.isSafeInteger(y) || y < 0 || y + 1 >= height) return 0;
+    asafenumber(y, 'y');
+    if (width < 2 || y < 0 || y + 1 >= height) return 0;
     const base0 = this.wordIndex(0, y);
     const base1 = this.wordIndex(0, y + 1);
     // valid "left-edge" positions x in [0 .. W-2]
@@ -1005,7 +1047,10 @@ const ECC_BLOCKS = {
 // ISO/IEC 18004:2024 sections 5.3/7.4/7.5/7.9/7.10: QR layout, segment, format/version, and capacity helpers.
 const info = /* @__PURE__ */ Object.freeze({
   size: /* @__PURE__ */ Object.freeze({
-    encode: (ver: Version) => 21 + 4 * (ver - 1), // ver1 = 21, ver40 = 177 modules per side
+    encode: (ver: Version) => {
+      validateVersion(ver);
+      return 21 + 4 * (ver - 1); // ver1 = 21, ver40 = 177 modules per side
+    },
     decode: (size: number) => (size - 17) / 4,
   } as Coder<Version, number>),
   // ISO/IEC 18004:2024 Table 3: map version ranges 1-9, 10-26, and 27-40 to count-width indexes.
@@ -1519,7 +1564,7 @@ declare const TextEncoder: any;
 // non-default initial ECI data starts with an ECI header. Keep UTF-8 bytes
 // without that header for compatibility with existing emoji/qrcode fixtures.
 export function utf8ToBytes(str: string): TRet<Uint8Array> {
-  if (typeof str !== 'string') throw new Error(`utf8ToBytes expected string, got ${typeof str}`);
+  astring(str, 'str');
   return new Uint8Array(new TextEncoder().encode(str)) as TRet<Uint8Array>; // https://bugzil.la/1681809
 }
 
@@ -1756,7 +1801,10 @@ export function encodeQR(
   output: Output = 'raw',
   opts: TArg<QrOpts & SvgQrOpts> = {}
 ) {
-  const _opts = opts as QrOpts & SvgQrOpts;
+  // Public guards run before QR mode detection and option reads so bad inputs keep argument names.
+  astring(text, 'text');
+  astring(output, 'output');
+  const _opts = validateObject(opts, 'opts') as QrOpts & SvgQrOpts;
   const ecc = _opts.ecc !== undefined ? _opts.ecc : 'medium';
   validateECC(ecc);
   const encoding = _opts.encoding !== undefined ? _opts.encoding : detectType(text);
@@ -1789,7 +1837,8 @@ export function encodeQR(
   // 2-module default to avoid changing encoder output; callers that need a
   // standards-conformant quiet zone must pass `border: 4` explicitly.
   const border = _opts.border === undefined ? 2 : _opts.border;
-  if (!Number.isSafeInteger(border) || border <= 0) throw new Error(`invalid border=${border}`);
+  asafenumber(border, 'opts.border');
+  if (border <= 0) throw new RangeError(`invalid border=${border}`);
   res = res.border(border, false); // Add border
   if (_opts.scale !== undefined) res = res.scale(_opts.scale); // Scale image
   if (output === 'raw') return res.toRaw();

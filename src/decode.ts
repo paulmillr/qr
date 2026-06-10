@@ -20,7 +20,7 @@ limitations under the License.
  */
 
 import type { EncodingType, ErrorCorrection, Image, Mask, Point, TArg, TRet } from './index.ts';
-import { Bitmap, utils } from './index.ts';
+import { asafenumber, Bitmap, utils, validateObject } from './index.ts';
 
 // Constants
 const MAX_BITS_ERROR = 3; // Up to 3 bit errors in version/format
@@ -1338,11 +1338,12 @@ function cropToSquare(img: TArg<Image>) {
  * ```
  */
 export function decodeQR(img: TArg<Image>, opts: TArg<DecodeOpts> = {}): string {
-  let image = img as Image;
-  const options = opts as DecodeOpts;
+  // Validate public wrappers before field reads hide which top-level argument was wrong.
+  let image = validateObject(img, 'img') as Image;
+  const options = validateObject(opts, 'opts') as DecodeOpts;
   for (const field of ['height', 'width'] as const) {
-    if (!Number.isSafeInteger(image[field]) || image[field] <= 0)
-      throw new Error(`invalid img.${field}=${image[field]} (${typeof image[field]})`);
+    asafenumber(image[field], `img.${field}`);
+    if (image[field] <= 0) throw new RangeError(`invalid img.${field}=${image[field]}`);
   }
   const { data } = image;
   if (!Array.isArray(data) && !isBytes(data))

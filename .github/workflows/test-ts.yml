@@ -4,7 +4,7 @@ on:
   - pull_request
 jobs:
   test-ts:
-    name: jsbt v0.5.1
-    uses: paulmillr/jsbt/.github/workflows/test.yml@231cc389fe2f825b6531285ad8c275584bf76588
+    name: jsbt v0.5.2
+    uses: paulmillr/jsbt/.github/workflows/test.yml@3b6bf563e416e9c6047db19410988922084e1e92
     with:
       runs-on: 'ubuntu-24.04'

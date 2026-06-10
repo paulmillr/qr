@@ -413,11 +413,20 @@ should('Penalty dark ratio boundary', () => {
 });
 
 should('encodeQR rejects non-positive and unsafe border sizes', () => {
-  throws(() => encodeQR('x', 'raw', { border: 0 }), new Error('invalid border=0'));
-  throws(() => encodeQR('x', 'raw', { border: -1 }), new Error('invalid border=-1'));
-  throws(() => encodeQR('x', 'raw', { border: 0.5 }), new Error('invalid border=0.5'));
-  throws(() => encodeQR('x', 'raw', { border: NaN }), new Error('invalid border=NaN'));
-  throws(() => encodeQR('x', 'raw', { border: Infinity }), new Error('invalid border=Infinity'));
+  throws(() => encodeQR('x', 'raw', { border: 0 }), new RangeError('invalid border=0'));
+  throws(() => encodeQR('x', 'raw', { border: -1 }), new RangeError('invalid border=-1'));
+  throws(
+    () => encodeQR('x', 'raw', { border: 0.5 }),
+    new RangeError('"opts.border" expected safe integer, got 0.5')
+  );
+  throws(
+    () => encodeQR('x', 'raw', { border: NaN }),
+    new RangeError('"opts.border" expected safe integer, got NaN')
+  );
+  throws(
+    () => encodeQR('x', 'raw', { border: Infinity }),
+    new RangeError('"opts.border" expected safe integer, got Infinity')
+  );
 });
 
 should('Full API test', () => {

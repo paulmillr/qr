@@ -161,37 +161,40 @@ should('Bitmap rejects non-positive and unsafe dimensions', () => {
   );
   throws(
     () => new Bitmap({ height: 1, width: NaN }),
-    new Error('Bitmap: invalid width=NaN (number)')
+    new RangeError('Bitmap: invalid width=NaN (number)')
   );
   throws(
     () => new Bitmap({ height: NaN, width: 1 }),
-    new Error('Bitmap: invalid height=NaN (number)')
+    new RangeError('Bitmap: invalid height=NaN (number)')
   );
   throws(
     () => new Bitmap({ height: 1, width: 1.5 }),
-    new Error('Bitmap: invalid width=1.5 (number)')
+    new RangeError('Bitmap: invalid width=1.5 (number)')
   );
   throws(
     () => new Bitmap({ height: 1.5, width: 1 }),
-    new Error('Bitmap: invalid height=1.5 (number)')
+    new RangeError('Bitmap: invalid height=1.5 (number)')
   );
   throws(
     () => new Bitmap({ height: 1, width: Number.MAX_SAFE_INTEGER + 1 }),
-    new Error('Bitmap: invalid width=9007199254740992 (number)')
+    new RangeError('Bitmap: invalid width=9007199254740992 (number)')
   );
   throws(
     () => new Bitmap({ height: Number.MAX_SAFE_INTEGER + 1, width: 1 }),
-    new Error('Bitmap: invalid height=9007199254740992 (number)')
+    new RangeError('Bitmap: invalid height=9007199254740992 (number)')
   );
 });
 
 should('Bitmap.border rejects non-positive and unsafe sizes', () => {
   const b = new Bitmap({ height: 2, width: 2 });
-  throws(() => b.border(0, false), new Error('Bitmap.border: invalid size=0'));
-  throws(() => b.border(-1, false), new Error('Bitmap.border: invalid size=-1'));
-  throws(() => b.border(0.5, false), new Error('Bitmap.border: invalid size=0.5'));
-  throws(() => b.border(NaN, false), new Error('Bitmap.border: invalid size=NaN'));
-  throws(() => b.border(Infinity, false), new Error('Bitmap.border: invalid size=Infinity'));
+  throws(() => b.border(0, false), new RangeError('Bitmap.border: invalid size=0'));
+  throws(() => b.border(-1, false), new RangeError('Bitmap.border: invalid size=-1'));
+  throws(() => b.border(0.5, false), new RangeError('"border" expected safe integer, got 0.5'));
+  throws(() => b.border(NaN, false), new RangeError('"border" expected safe integer, got NaN'));
+  throws(
+    () => b.border(Infinity, false),
+    new RangeError('"border" expected safe integer, got Infinity')
+  );
 });
 
 should('Bitmap.countPatternInRow validates scan inputs', () => {
@@ -201,13 +204,25 @@ should('Bitmap.countPatternInRow validates scan inputs', () => {
       valid: b.countPatternInRow(0, 2, 0),
       negativeRow: b.countPatternInRow(-1, 2, 0),
       pastEndRow: b.countPatternInRow(1, 2, 0),
-      fractionalRow: b.countPatternInRow(0.5, 2, 0),
-      nanRow: b.countPatternInRow(NaN, 2, 0),
     },
-    { valid: 3, negativeRow: 0, pastEndRow: 0, fractionalRow: 0, nanRow: 0 }
+    { valid: 3, negativeRow: 0, pastEndRow: 0 }
   );
-  throws(() => b.countPatternInRow(0, 1.5, 0), new Error('wrong patternLen'));
-  throws(() => b.countPatternInRow(0, NaN, 0), new Error('wrong patternLen'));
+  throws(
+    () => b.countPatternInRow(0.5, 2, 0),
+    new RangeError('"y" expected safe integer, got 0.5')
+  );
+  throws(
+    () => b.countPatternInRow(NaN, 2, 0),
+    new RangeError('"y" expected safe integer, got NaN')
+  );
+  throws(
+    () => b.countPatternInRow(0, 1.5, 0),
+    new RangeError('"patternLen" expected safe integer, got 1.5')
+  );
+  throws(
+    () => b.countPatternInRow(0, NaN, 0),
+    new RangeError('"patternLen" expected safe integer, got NaN')
+  );
 });
 
 should('Bitmap.getRuns validates row input', () => {
@@ -226,8 +241,6 @@ should('Bitmap.getRuns validates row input', () => {
       validSecond: runs(1),
       negativeRow: runs(-1),
       pastEndRow: runs(2),
-      fractionalRow: runs(0.5),
-      nanRow: runs(NaN),
     },
     {
       validFirst: [
@@ -243,10 +256,10 @@ should('Bitmap.getRuns validates row input', () => {
       ],
       negativeRow: [],
       pastEndRow: [],
-      fractionalRow: [],
-      nanRow: [],
     }
   );
+  throws(() => runs(0.5), new RangeError('"y" expected safe integer, got 0.5'));
+  throws(() => runs(NaN), new RangeError('"y" expected safe integer, got NaN'));
 });
 
 should('Bitmap.countBoxes2x2 validates row input', () => {
@@ -261,20 +274,17 @@ should('Bitmap.countBoxes2x2 validates row input', () => {
       validSecond: b.countBoxes2x2(1),
       negativeRow: b.countBoxes2x2(-1),
       pastEndRow: b.countBoxes2x2(2),
-      negativeFractional: b.countBoxes2x2(-0.5),
-      positiveFractional: b.countBoxes2x2(0.5),
-      nanRow: b.countBoxes2x2(NaN),
     },
     {
       validFirst: 1,
       validSecond: 1,
       negativeRow: 0,
       pastEndRow: 0,
-      negativeFractional: 0,
-      positiveFractional: 0,
-      nanRow: 0,
     }
   );
+  throws(() => b.countBoxes2x2(-0.5), new RangeError('"y" expected safe integer, got -0.5'));
+  throws(() => b.countBoxes2x2(0.5), new RangeError('"y" expected safe integer, got 0.5'));
+  throws(() => b.countBoxes2x2(NaN), new RangeError('"y" expected safe integer, got NaN'));
 });
 
 should('Square size/coordinates', () => {

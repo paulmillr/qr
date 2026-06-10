@@ -20,18 +20,15 @@
     "LICENSE-MIT"
   ],
   "devDependencies": {
-    "@paulmillr/jsbt": "0.5.0",
+    "@paulmillr/jsbt": "0.5.2",
     "@types/node": "25.3.0",
     "prettier": "3.6.2",
     "typescript": "6.0.2"
   },
   "scripts": {
     "build": "tsc",
-    "build:release": "npx --no @paulmillr/jsbt esbuild test/build",
+    "build:release": "npx --no @paulmillr/jsbt bundle test/build",
     "check": "npx --no @paulmillr/jsbt check package.json",
-    "check:readme": "npx --no @paulmillr/jsbt readme package.json",
-    "check:treeshake": "npx --no @paulmillr/jsbt treeshake package.json test/build/out-treeshake",
-    "check:jsdoc": "npx --no @paulmillr/jsbt tsdoc package.json",
     "bench": "cd test/benchmark && npm ci && node index.ts",
     "format": "prettier --write src",
     "test": "cd test; npm ci; node --experimental-strip-types --no-warnings index.ts",
