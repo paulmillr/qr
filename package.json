@@ -22,6 +22,12 @@
   "devDependencies": {
     "@paulmillr/jsbt": "0.5.2",
     "@types/node": "25.3.0",
+    "@types/jsdom": "21.1.7",
+    "canvas": "3.2.3",
+    "global-jsdom": "26.0.0",
+    "jpeg-js": "0.4.4",
+    "jsdom": "26.0.0",
+    "omggif": "1.0.10",
     "prettier": "3.6.2",
     "typescript": "6.0.2"
   },
@@ -31,10 +37,10 @@
     "check": "npx --no @paulmillr/jsbt check package.json",
     "bench": "cd test/benchmark && npm ci && node index.ts",
     "format": "prettier --write src",
-    "test": "cd test; npm ci; node --experimental-strip-types --no-warnings index.ts",
-    "test:bun": "cd test; bun install; bun index.ts",
-    "test:deno": "cd test; npm install; deno --allow-env --allow-read index.ts",
-    "test:node20": "cd test; npx tsc; cd compiled/test; npm install; node index.js"
+    "test": "node --no-warnings test/index.ts",
+    "test:bun": "bun test/index.ts",
+    "test:deno": "deno --allow-env --allow-read test/index.ts",
+    "test:node20": "cd test; npx tsc; cd compiled/test; node index.js"
   },
   "exports": {
     ".": "./index.js",
