@@ -1,8 +1,8 @@
 import { should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual, throws } from 'node:assert';
+import { cpus } from 'node:os';
 import encodeQR, { _tests } from '../src/index.ts';
-import { jsonGZ } from './utils.ts';
-const TEST_CASES = jsonGZ('vectors/small-vectors.json.gz');
+import { jsonGZItems } from './utils.ts';
 
 should('qr v1', () => {
   const v1_data = new Uint8Array([
@@ -452,14 +452,25 @@ should('Full API test', () => {
 `.replace('\n', '');
   deepStrictEqual(q, exp);
 });
-// 170 mb of tests
-for (let i = 0; i < TEST_CASES.length; i++) {
-  const v = TEST_CASES[i];
-  const { text: input, out: output, ecc } = v;
-  const opt = { ecc };
-  should(`small test(${i})`, () => {
-    const q = encodeQR(input, 'ascii', opt);
-    deepStrictEqual(q, output);
+const SMALL_VECTOR_SHARDS = should.opts.FAST
+  ? should.opts.FAST === 1
+    ? cpus().length
+    : should.opts.FAST
+  : 1;
+
+for (let shard = 0; shard < SMALL_VECTOR_SHARDS; shard++) {
+  should(`small vectors shard(${shard + 1}/${SMALL_VECTOR_SHARDS})`, async () => {
+    let count = 0;
+    for await (const { index, value: v } of jsonGZItems('vectors/small-vectors.json.gz', {
+      start: shard,
+      step: SMALL_VECTOR_SHARDS,
+    })) {
+      const { text: input, out: output, ecc } = v;
+      const q = encodeQR(input, 'ascii', { ecc });
+      deepStrictEqual(q, output, `small test(${index})`);
+      count++;
+    }
+    if (shard === 0 && count === 0) throw new Error('small vector stream did not yield tests');
   });
 }
 
