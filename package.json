@@ -20,9 +20,9 @@
     "LICENSE-MIT"
   ],
   "devDependencies": {
-    "@paulmillr/jsbt": "0.5.2",
-    "@types/node": "25.3.0",
+    "@paulmillr/jsbt": "0.6.0",
     "@types/jsdom": "21.1.7",
+    "@types/node": "25.3.0",
     "canvas": "3.2.3",
     "global-jsdom": "26.0.0",
     "jpeg-js": "0.4.4",
@@ -33,8 +33,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "build:release": "npx --no @paulmillr/jsbt bundle test/build",
-    "check": "npx --no @paulmillr/jsbt check package.json",
+    "bundle": "npx --no @paulmillr/jsbt bundle test/build",
+    "check": "npx --no @paulmillr/jsbt check",
     "bench": "cd test/benchmark && npm ci && node index.ts",
     "format": "prettier --write src",
     "test": "node --no-warnings test/index.ts",
