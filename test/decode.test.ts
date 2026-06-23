@@ -116,6 +116,14 @@ should('decodeQR validates textDecoder option before decoding', () => {
   );
 });
 
+should('decodeQR downsamples bordered monochrome rasters', () => {
+  const raw = encodeQR('HELLO WORLD', 'raw', { version: 1, border: 2 });
+  const img = new Bitmap(raw.length, raw).scale(4).toImage();
+  const bmp = _tests.toBitmap(img);
+  deepStrictEqual([bmp.width, bmp.height], [raw.length, raw.length]);
+  deepStrictEqual(readQR(img), 'HELLO WORLD');
+});
+
 const alignmentBitmap = () => {
   const width = 7;
   const center = 3;

@@ -34,23 +34,28 @@ const PATTERN_VARIANCE = 2;
 const PATTERN_VARIANCE_DIAGONAL = 1.333;
 const PATTERN_MIN_CONFIRMATIONS = 2;
 const DETECT_MIN_ROW_SKIP = 3;
-// Pair LUTs for the 8x8 block-stat fast path: each 16-bit lane holds two
-// brightness bytes, so we can accumulate sum/min/max four pixels at a time.
-const SUM16 = new Uint16Array(1 << 16);
-const MIN16 = new Uint8Array(1 << 16);
-const MAX16 = new Uint8Array(1 << 16);
-for (let i = 0; i < SUM16.length; i++) {
+// Pair LUTs for the grayscale and 8x8 block-stat fast paths. `GRAY16` maps a
+// packed RG pair to r + 2*g; `STAT16` maps two brightness bytes to packed
+// sum/min/max so block scans need one table lookup per pair instead of three.
+const GRAY16 = new Uint16Array(1 << 16);
+const STAT16 = new Uint32Array(1 << 16);
+for (let i = 0; i < GRAY16.length; i++) {
   const lo = i & 0xff;
   const hi = i >>> 8;
-  SUM16[i] = lo + hi;
-  MIN16[i] = lo < hi ? lo : hi;
-  MAX16[i] = lo > hi ? lo : hi;
+  const min = lo < hi ? lo : hi;
+  const max = lo > hi ? lo : hi;
+  GRAY16[i] = lo + 2 * hi;
+  STAT16[i] = lo + hi + (min << 9) + (max << 17);
 }
 
 // TODO: move to index, nearby with bitmap and other graph related stuff?
 // Fast truncation for values expected to be non-negative; negatives would wrap
 // through uint32 because this uses `>>> 0`, not `Math.floor()`.
 const int = (n: number) => n >>> 0;
+const gcd = (a: number, b: number): number => {
+  while (b !== 0) [a, b] = [b, a % b];
+  return a;
+};
 
 type Point4 = [Point, Point, Point, Point];
 /** Finder and alignment points returned by the detector. */
@@ -97,6 +102,150 @@ function getBytesPerPixel(img: TArg<Image>): number {
 function isBytes(data: unknown): data is Uint8Array {
   return data instanceof Uint8Array || data instanceof Uint8ClampedArray;
 }
+
+function toMonochromeBitmap(
+  width: number,
+  height: number,
+  data: TArg<Image>['data'],
+  bytesPerPixel: number
+): Bitmap | undefined {
+  if (bytesPerPixel === 4 && isBytes(data) && (data.byteOffset & 3) === 0) {
+    const pixels = new Uint32Array(data.buffer, data.byteOffset, width * height);
+    const first = pixels[0] >>> 0;
+    if (first !== 0xff000000 && first !== 0xffffffff) return undefined;
+    if (first !== 0xffffffff) return undefined;
+    let runGcd = 0;
+    for (let y = 0; y < height; y++) {
+      let src = y * width;
+      let runValue = pixels[src] >>> 0;
+      let runLen = 0;
+      for (let x = 0; x < width; x++, src++) {
+        const px = pixels[src] >>> 0;
+        if (px !== 0xff000000 && px !== 0xffffffff) return undefined;
+        if (px === runValue) {
+          runLen++;
+        } else {
+          runGcd = runGcd === 0 ? runLen : gcd(runGcd, runLen);
+          runValue = px;
+          runLen = 1;
+        }
+      }
+      runGcd = runGcd === 0 ? runLen : gcd(runGcd, runLen);
+    }
+    const draw = (scale: number) => {
+      const scaledWidth = width / scale;
+      const scaledHeight = height / scale;
+      const matrix = new Bitmap({ width: scaledWidth, height: scaledHeight });
+      const words = (matrix as unknown as { words: number }).words;
+      const value = (matrix as unknown as { value: Uint32Array }).value;
+      for (let y = 0; y < scaledHeight; y++) {
+        const srcY = y * scale;
+        const row = y * words;
+        for (let x = 0; x < scaledWidth; x++) {
+          const srcX = x * scale;
+          if (pixels[srcY * width + srcX] >>> 0 === 0xff000000)
+            value[row + (x >>> 5)] |= 1 << (x & 31);
+        }
+      }
+      return matrix;
+    };
+    const hasWhiteBorder = () => {
+      for (let x = 0; x < width; x++) {
+        if (pixels[x] >>> 0 !== 0xffffffff) return false;
+        if (pixels[(height - 1) * width + x] >>> 0 !== 0xffffffff) return false;
+      }
+      for (let y = 1; y < height - 1; y++) {
+        if (pixels[y * width] >>> 0 !== 0xffffffff) return false;
+        if (pixels[y * width + width - 1] >>> 0 !== 0xffffffff) return false;
+      }
+      return true;
+    };
+    if (runGcd > 1 && width % runGcd === 0 && height % runGcd === 0 && hasWhiteBorder()) {
+      const scaledWidth = width / runGcd;
+      const scaledHeight = height / runGcd;
+      for (let y = 0; y < scaledHeight; y++) {
+        const srcY = y * runGcd;
+        for (let x = 0; x < scaledWidth; x++) {
+          const srcX = x * runGcd;
+          const px = pixels[srcY * width + srcX] >>> 0;
+          for (let yy = 1; yy < runGcd; yy++) {
+            if (pixels[(srcY + yy) * width + srcX] >>> 0 !== px) return undefined;
+          }
+        }
+      }
+      return draw(runGcd);
+    }
+    return undefined;
+  }
+  if (data.length < 3) return undefined;
+  const r0 = data[0];
+  if (r0 !== data[1] || r0 !== data[2] || (r0 !== 0 && r0 !== 255)) return undefined;
+  if (r0 !== 255) return undefined;
+  let runGcd = 0;
+  for (let y = 0; y < height; y++) {
+    let src = y * width * bytesPerPixel;
+    let runValue = data[src];
+    let runLen = 0;
+    for (let x = 0; x < width; x++, src += bytesPerPixel) {
+      const r = data[src];
+      if (r !== data[src + 1] || r !== data[src + 2] || (r !== 0 && r !== 255)) return undefined;
+      if (r === runValue) {
+        runLen++;
+      } else {
+        runGcd = runGcd === 0 ? runLen : gcd(runGcd, runLen);
+        runValue = r;
+        runLen = 1;
+      }
+    }
+    runGcd = runGcd === 0 ? runLen : gcd(runGcd, runLen);
+  }
+  const draw = (scale: number) => {
+    const scaledWidth = width / scale;
+    const scaledHeight = height / scale;
+    const matrix = new Bitmap({ width: scaledWidth, height: scaledHeight });
+    const words = (matrix as unknown as { words: number }).words;
+    const value = (matrix as unknown as { value: Uint32Array }).value;
+    for (let y = 0; y < scaledHeight; y++) {
+      const srcY = y * scale;
+      const row = y * words;
+      for (let x = 0; x < scaledWidth; x++) {
+        const srcX = x * scale;
+        const r = data[(srcY * width + srcX) * bytesPerPixel];
+        if (r === 0) value[row + (x >>> 5)] |= 1 << (x & 31);
+      }
+    }
+    return matrix;
+  };
+  const hasWhiteBorder = () => {
+    for (let x = 0; x < width; x++) {
+      if (data[x * bytesPerPixel] !== 255) return false;
+      if (data[((height - 1) * width + x) * bytesPerPixel] !== 255) return false;
+    }
+    for (let y = 1; y < height - 1; y++) {
+      if (data[y * width * bytesPerPixel] !== 255) return false;
+      if (data[(y * width + width - 1) * bytesPerPixel] !== 255) return false;
+    }
+    return true;
+  };
+  if (runGcd > 1 && width % runGcd === 0 && height % runGcd === 0 && hasWhiteBorder()) {
+    const scaledWidth = width / runGcd;
+    const scaledHeight = height / runGcd;
+    for (let y = 0; y < scaledHeight; y++) {
+      const srcY = y * runGcd;
+      for (let x = 0; x < scaledWidth; x++) {
+        const srcX = x * runGcd;
+        const src = (srcY * width + srcX) * bytesPerPixel;
+        const r = data[src];
+        for (let yy = 1; yy < runGcd; yy++) {
+          if (data[((srcY + yy) * width + srcX) * bytesPerPixel] !== r) return undefined;
+        }
+      }
+    }
+    return draw(runGcd);
+  }
+  return undefined;
+}
+
 /**
  * Convert to grayscale. The function is the most expensive part of decoding:
  * it takes up to 90% of time.
@@ -122,6 +271,10 @@ function toBitmap(img: TArg<Image>): TRet<Bitmap> {
   const data = image.data;
   const bytesPerPixel = getBytesPerPixel(img);
   const pixLen = height * width;
+  const block = GRAYSCALE_BLOCK_SIZE;
+  if (width < block * 5 || height < block * 5) throw new Error('image too small');
+  const monochrome = toMonochromeBitmap(width, height, data, bytesPerPixel);
+  if (monochrome !== undefined) return monochrome as TRet<Bitmap>;
   const brightness = new Uint8Array(pixLen);
   if (bytesPerPixel === 4 && isBytes(data) && (data.byteOffset & 3) === 0) {
     // Little-endian RGBA: compute four grayscale bytes and commit as one u32 store.
@@ -141,15 +294,15 @@ function toBitmap(img: TArg<Image>): TRet<Bitmap> {
       const v3 = pixels[i + 3] >>> 0;
       // RGBA words are little-endian here, so this is `(r + 2*g + b) / 4`
       // computed from the packed byte lanes for four pixels at once.
-      const b0 = ((v0 & 0xff) + (((v0 >>> 8) & 0xff) << 1) + ((v0 >>> 16) & 0xff)) >>> 2;
-      const b1 = ((v1 & 0xff) + (((v1 >>> 8) & 0xff) << 1) + ((v1 >>> 16) & 0xff)) >>> 2;
-      const b2 = ((v2 & 0xff) + (((v2 >>> 8) & 0xff) << 1) + ((v2 >>> 16) & 0xff)) >>> 2;
-      const b3 = ((v3 & 0xff) + (((v3 >>> 8) & 0xff) << 1) + ((v3 >>> 16) & 0xff)) >>> 2;
+      const b0 = (GRAY16[v0 & 0xffff] + ((v0 >>> 16) & 0xff)) >>> 2;
+      const b1 = (GRAY16[v1 & 0xffff] + ((v1 >>> 16) & 0xff)) >>> 2;
+      const b2 = (GRAY16[v2 & 0xffff] + ((v2 >>> 16) & 0xff)) >>> 2;
+      const b3 = (GRAY16[v3 & 0xffff] + ((v3 >>> 16) & 0xff)) >>> 2;
       bright32[j] = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
     }
     for (let i = n4; i < pixels.length; i++) {
       const v = pixels[i] >>> 0;
-      brightness[i] = ((v & 0xff) + (((v >>> 8) & 0xff) << 1) + ((v >>> 16) & 0xff)) >>> 2;
+      brightness[i] = (GRAY16[v & 0xffff] + ((v >>> 16) & 0xff)) >>> 2;
     }
   } else {
     for (let i = 0, j = 0, d = data; i < d.length; i += bytesPerPixel) {
@@ -178,8 +331,6 @@ function toBitmap(img: TArg<Image>): TRet<Bitmap> {
   }
   const spreadMean = spreadSum / spreadCnt;
   // Convert to bitmap
-  const block = GRAYSCALE_BLOCK_SIZE;
-  if (width < block * 5 || height < block * 5) throw new Error('image too small');
   const bWidth = Math.ceil(width / block);
   const bHeight = Math.ceil(height / block);
   const maxY = height - block;
@@ -226,19 +377,23 @@ function toBitmap(img: TArg<Image>): TRet<Bitmap> {
           const a1 = w0 >>> 16;
           const b0 = w1 & 0xffff;
           const b1 = w1 >>> 16;
-          sum += SUM16[a0] + SUM16[a1] + SUM16[b0] + SUM16[b1];
-          const min0 = MIN16[a0];
-          const min1 = MIN16[a1];
-          const min2 = MIN16[b0];
-          const min3 = MIN16[b1];
+          const s0 = STAT16[a0];
+          const s1 = STAT16[a1];
+          const s2 = STAT16[b0];
+          const s3 = STAT16[b1];
+          sum += (s0 & 0x1ff) + (s1 & 0x1ff) + (s2 & 0x1ff) + (s3 & 0x1ff);
+          const min0 = (s0 >>> 9) & 0xff;
+          const min1 = (s1 >>> 9) & 0xff;
+          const min2 = (s2 >>> 9) & 0xff;
+          const min3 = (s3 >>> 9) & 0xff;
           if (min0 < min) min = min0;
           if (min1 < min) min = min1;
           if (min2 < min) min = min2;
           if (min3 < min) min = min3;
-          const max0 = MAX16[a0];
-          const max1 = MAX16[a1];
-          const max2 = MAX16[b0];
-          const max3 = MAX16[b1];
+          const max0 = s0 >>> 17;
+          const max1 = s1 >>> 17;
+          const max2 = s2 >>> 17;
+          const max3 = s3 >>> 17;
           if (max0 > max) max = max0;
           if (max1 > max) max = max1;
           if (max2 > max) max = max2;
@@ -1165,36 +1320,37 @@ function decodeBitmap(
   const bytes = new Uint8Array(total);
   let pos = 0;
   let buf = 0;
-  let bitPos = 0;
+  let byteBitPos = 0;
   utils.zigzag(tpl, mask, (x, y, m) => {
-    bitPos++;
+    byteBitPos++;
     buf <<= 1;
     buf |= +(!!bm.get(x, y) !== m);
-    if (bitPos !== 8) return;
+    if (byteBitPos !== 8) return;
     bytes[pos++] = buf;
-    bitPos = 0;
+    byteBitPos = 0;
     buf = 0;
   });
   if (pos !== total) throw new Error(`decode: pos=${pos}, total=${total}`);
-  let bits = Array.from(utils.interleave(version, ecc).decode(bytes))
-    .map((i) => utils.bin(i, 8))
-    .join('');
+  const decoded = utils.interleave(version, ecc).decode(bytes);
+  let bitPos = 0;
+  const bitLen = decoded.length * 8;
   // Reverse operation of index.ts/encode working on bits
   const readBits = (n: number) => {
-    if (n > bits.length) throw new Error('Not enough bits');
-    const val = bits.slice(0, n);
-    bits = bits.slice(n);
+    if (bitPos + n > bitLen) throw new Error('Not enough bits');
+    let val = 0;
+    for (let i = 0; i < n; i++, bitPos++) {
+      val = (val << 1) | ((decoded[bitPos >>> 3] >>> (7 - (bitPos & 7))) & 1);
+    }
     return val;
   };
-  const toNum = (n: string) => Number(`0b${n}`);
   // reverse of common.info.modebits
-  const modes: Record<string, EncodingType | 'terminator'> = {
-    '0000': 'terminator',
-    '0001': 'numeric',
-    '0010': 'alphanumeric',
-    '0100': 'byte',
-    '0111': 'eci',
-    '1000': 'kanji',
+  const modes: Record<number, EncodingType | 'terminator'> = {
+    0b0000: 'terminator',
+    0b0001: 'numeric',
+    0b0010: 'alphanumeric',
+    0b0100: 'byte',
+    0b0111: 'eci',
+    0b1000: 'kanji',
   };
   let res = '';
   // ISO/IEC 18004:2024 §7.3.2 defines no-ECI byte data as ECI 000003
@@ -1202,45 +1358,46 @@ function decodeBitmap(
   // payloads and with encodeQR's UTF-8 byte-mode default.
   let eci: number = 26; // Default to utf-8 for compat with old behavior
   while (true) {
-    if (bits.length < 4) break;
+    if (bitLen - bitPos < 4) break;
     const modeBits = readBits(4);
     const mode = modes[modeBits];
-    if (mode === undefined) throw new Error(`Unknown modeBits=${modeBits} res="${res}"`);
+    if (mode === undefined)
+      throw new Error(`Unknown modeBits=${modeBits.toString(2).padStart(4, '0')} res="${res}"`);
     if (mode === 'terminator') break;
     const countBits = utils.info.lengthBits(version, mode);
-    let count = toNum(readBits(countBits));
+    let count = readBits(countBits);
     if (mode === 'numeric') {
       while (count >= 3) {
-        const v = toNum(readBits(10));
+        const v = readBits(10);
         if (v >= 1000) throw new Error(`numberic(3) = ${v}`);
         res += v.toString().padStart(3, '0');
         count -= 3;
       }
       if (count === 2) {
-        const v = toNum(readBits(7));
+        const v = readBits(7);
         if (v >= 100) throw new Error(`numeric(2) = ${v}`);
         res += v.toString().padStart(2, '0');
       } else if (count === 1) {
-        const v = toNum(readBits(4));
+        const v = readBits(4);
         if (v >= 10) throw new Error(`Numeric(1) = ${v}`);
         res += v.toString();
       }
     } else if (mode === 'alphanumeric') {
       while (count >= 2) {
-        const v = toNum(readBits(11));
+        const v = readBits(11);
         res += utils.info.alphabet.alphanumerc.encode([Math.floor(v / 45), v % 45]).join('');
         count -= 2;
       }
-      if (count === 1) res += utils.info.alphabet.alphanumerc.encode([toNum(readBits(6))]).join('');
+      if (count === 1) res += utils.info.alphabet.alphanumerc.encode([readBits(6)]).join('');
     } else if (mode === 'eci') {
-      const first = toNum(readBits(8));
+      const first = readBits(8);
       if ((first & 0x80) === 0) eci = first;
-      else if ((first & 0xc0) === 0x80) eci = ((first & 0x3f) << 8) | toNum(readBits(8));
-      else eci = ((first & 0x1f) << 16) | toNum(readBits(16));
+      else if ((first & 0xc0) === 0x80) eci = ((first & 0x3f) << 8) | readBits(8);
+      else eci = ((first & 0x1f) << 16) | readBits(16);
       continue; // ECI doesn't carry data, just sets state
     } else if (mode === 'byte') {
       const data = new Uint8Array(count);
-      for (let i = 0; i < count; i++) data[i] = toNum(readBits(8));
+      for (let i = 0; i < count; i++) data[i] = readBits(8);
       res += decoder(data, eci);
     } else if (mode === 'kanji') {
       // ISO/IEC 18004:2024 §7.3.6 says Kanji mode uses Shift JIS and
