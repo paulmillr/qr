@@ -165,8 +165,7 @@ export function anumber(n: number, title: string): number {
 
 export function asafenumber(n: number, title: string): number {
   anumber(n, title);
-  if (!Number.isSafeInteger(n))
-    throw new RangeError(`"${title}" expected safe integer, got ${n}`);
+  if (!Number.isSafeInteger(n)) throw new RangeError(`"${title}" expected safe integer, got ${n}`);
   return n;
 }
 
@@ -193,6 +192,13 @@ function validateVersion(ver: Version): void {
 
 function bin(dec: number, pad: number): string {
   return dec.toString(2).padStart(pad, '0');
+}
+
+function writeBits(bytes: Uint8Array, bitPos: number, value: number, len: number): number {
+  for (let i = len - 1; i >= 0; i--, bitPos++) {
+    bytes[bitPos >>> 3] |= ((value >>> i) & 1) << (7 - (bitPos & 7));
+  }
+  return bitPos;
 }
 
 function mod(a: number, b: number): number {
@@ -286,6 +292,35 @@ function alphabet(
       });
     },
   });
+}
+
+const NUMERIC_ALPHABET = '0123456789';
+const ALPHANUMERIC_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
+const alphabetValues = (alphabet: string) => {
+  const values = new Int8Array(128);
+  values.fill(-1);
+  for (let i = 0; i < alphabet.length; i++) values[alphabet.charCodeAt(i)] = i;
+  return values;
+};
+const NUMERIC_VALUES = /* @__PURE__ */ alphabetValues(NUMERIC_ALPHABET);
+const ALPHANUMERIC_VALUES = /* @__PURE__ */ alphabetValues(ALPHANUMERIC_ALPHABET);
+const alphabetValue = (values: Int8Array, char: string): number => {
+  if (char.length !== 1) return -1;
+  const code = char.charCodeAt(0);
+  return code < values.length ? values[code] : -1;
+};
+const checkedAlphabetValue = (values: Int8Array, char: string, alphabet: string): number => {
+  const value = alphabetValue(values, char);
+  if (value === -1) throw new Error(`Unknown letter: "${char}". Allowed: ${alphabet}`);
+  return value;
+};
+const validateAlphabetString = (values: Int8Array, data: string, alphabet: string): void => {
+  for (let i = 0; i < data.length; i++) checkedAlphabetValue(values, data[i], alphabet);
+};
+function validateEncodedBytes(bytes: TArg<Uint8Array>, title: string): Uint8Array {
+  if (!(bytes instanceof Uint8Array))
+    throw new TypeError(`"${title}" expected Uint8Array, got type=${typeof bytes}`);
+  return bytes as Uint8Array;
 }
 
 // Transpose 32x32 bit matrix in-place
@@ -768,7 +803,32 @@ export class Bitmap {
     const { height, width, value, words } = this;
     if (y < 0 || y >= height) return 0;
     let count = 0;
+    const p0 = patterns[0];
+    const p1 = patterns[1];
+    const patternCount = patterns.length;
     const rowBase = this.wordIndex(0, y);
+    if (patternCount === 1) {
+      for (let i = 0, window = 0; i < words; i++) {
+        const w = value[rowBase + i];
+        const bitEnd = i === words - 1 ? width & 31 || 32 : 32;
+        for (let b = 0; b < bitEnd; b++) {
+          window = ((window << 1) | ((w >>> b) & 1)) & mask;
+          if (i * 32 + b + 1 >= patternLen && window === p0) count++;
+        }
+      }
+      return count;
+    }
+    if (patternCount === 2) {
+      for (let i = 0, window = 0; i < words; i++) {
+        const w = value[rowBase + i];
+        const bitEnd = i === words - 1 ? width & 31 || 32 : 32;
+        for (let b = 0; b < bitEnd; b++) {
+          window = ((window << 1) | ((w >>> b) & 1)) & mask;
+          if (i * 32 + b + 1 >= patternLen && (window === p0 || window === p1)) count++;
+        }
+      }
+      return count;
+    }
     for (let i = 0, window = 0; i < words; i++) {
       const w = value[rowBase + i];
       const bitEnd = i === words - 1 ? width & 31 || 32 : 32;
@@ -1015,6 +1075,13 @@ export const Encoding: readonly ['numeric', 'alphanumeric', 'byte', 'kanji', 'ec
   /* @__PURE__ */ Object.freeze(['numeric', 'alphanumeric', 'byte', 'kanji', 'eci']);
 /** QR payload encoding name. */
 export type EncodingType = (typeof Encoding)[number];
+const MODE_BITS = /* @__PURE__ */ Object.freeze({
+  numeric: 0b0001,
+  alphanumeric: 0b0010,
+  byte: 0b0100,
+  kanji: 0b1000,
+  eci: 0b0111,
+} as Record<EncodingType, number>);
 
 // Various constants & tables
 // ISO/IEC 18004:2024 Table 1: QR symbol codeword capacity by version (data plus error correction).
@@ -1096,9 +1163,9 @@ const info = /* @__PURE__ */ Object.freeze({
   // ISO/IEC 18004:2024 §7.3.3 / §7.3.4 / §7.4.5 Table 5: character-set membership and value codecs for numeric and alphanumeric QR modes.
   alphabet: /* @__PURE__ */ Object.freeze({
     // ISO/IEC 18004:2024 §7.3.3 / §7.4.4: numeric-mode digits map directly to values 0..9 before 3-digit grouping.
-    numeric: alphabet('0123456789'),
+    numeric: alphabet(NUMERIC_ALPHABET),
     // ISO/IEC 18004:2024 §7.3.4 / §7.4.5 Table 5: 45-character alphanumeric-mode value order used for 11-bit pair packing. Keep the legacy `alphanumerc` key name in sync with existing callers.
-    alphanumerc: alphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:'),
+    alphanumerc: alphabet(ALPHANUMERIC_ALPHABET),
   }), // as Record<EncodingType, ReturnType<typeof alphabet>>,
   // ISO/IEC 18004:2024 Table 3 gives QR character-count widths for data modes; ECI headers instead carry only the mode indicator plus the designator from §7.4.3.
   lengthBits(ver: Version, type: EncodingType) {
@@ -1333,12 +1400,21 @@ const GF = {
 
 // Per-block Reed-Solomon coder: encode emits only the parity bytes for one
 // data block, while decode expects data+parity bytes and returns the corrected full block.
+const RS_DIVISOR_CACHE = new Map<number, number[]>();
+const rsDivisorPoly = (eccWords: number): number[] => {
+  let divisor = RS_DIVISOR_CACHE.get(eccWords);
+  if (divisor === undefined) {
+    divisor = GF.divisorPoly(eccWords);
+    RS_DIVISOR_CACHE.set(eccWords, divisor);
+  }
+  return divisor;
+};
 function RS(eccWords: number): TRet<Coder<Uint8Array, Uint8Array>> {
+  const d = rsDivisorPoly(eccWords);
   return {
     encode(from: TArg<Uint8Array>): TRet<Uint8Array> {
-      const d = GF.divisorPoly(eccWords);
       const pol = Array.from(from);
-      pol.push(...d.slice(0, -1).fill(0));
+      for (let i = 0; i < eccWords; i++) pol.push(0);
       return Uint8Array.from(GF.remainderPoly(pol, d)) as TRet<Uint8Array>;
     },
     decode(to: TArg<Uint8Array>): TRet<Uint8Array> {
@@ -1444,35 +1520,14 @@ function interleave(ver: Version, ecc: ErrorCorrection): TRet<Coder<Uint8Array, 
 // Generic template per version+ecc+mask. Can be cached, to speedup calculations.
 // Function-pattern template plus reserved format/version areas; data modules
 // are filled later by zigzag placement in `drawQR`.
-function drawTemplate(
+function drawInfo(
+  b: Bitmap,
   ver: Version,
   ecc: ErrorCorrection,
   maskIdx: Mask,
   test: boolean = false
-): TRet<Bitmap> {
+): void {
   const size = info.size.encode(ver);
-  let b = new Bitmap(size + 2);
-  // Finder patterns
-  // We draw full pattern and later slice, since before addition of borders finder is truncated by one pixel on sides
-  const finder = new Bitmap(3).rect(0, 3, true).border(1, false).border(1, true).border(1, false);
-  b = b
-    .embed(0, finder) // top left
-    .embed({ x: -finder.width, y: 0 }, finder) // top right
-    .embed({ x: 0, y: -finder.height }, finder); // bottom left
-  b = b.rectSlice(1, size);
-  // Alignment patterns
-  const align = new Bitmap(1).rect(0, 1, true).border(1, false).border(1, true);
-  const alignPos = info.alignmentPatterns(ver);
-  for (const y of alignPos) {
-    for (const x of alignPos) {
-      if (b.isDefined(x, y)) continue;
-      b.embed({ x: x - 2, y: y - 2 }, align); // center of pattern should be at position
-    }
-  }
-  // Timing patterns
-  b = b
-    .hLine({ x: 0, y: 6 }, Infinity, ({ x }) => (b.isDefined(x, 6) ? undefined : x % 2 == 0))
-    .vLine({ x: 6, y: 0 }, Infinity, ({ y }) => (b.isDefined(6, y) ? undefined : y % 2 == 0));
   // Format information
   {
     const bits = info.formatBits(ecc, maskIdx);
@@ -1501,7 +1556,47 @@ function drawTemplate(
       b.set(x, y, bit);
     }
   }
-  return b as TRet<Bitmap>;
+}
+
+const TEMPLATE_CACHE = new Map<string, Bitmap>();
+const templateCacheKey = (ver: Version, ecc: ErrorCorrection, maskIdx: Mask, test: boolean) =>
+  test ? `${ver}:test` : `${ver}:${ecc}:${maskIdx}`;
+
+function drawTemplate(
+  ver: Version,
+  ecc: ErrorCorrection,
+  maskIdx: Mask,
+  test: boolean = false
+): TRet<Bitmap> {
+  const key = templateCacheKey(ver, ecc, maskIdx, test);
+  const cached = TEMPLATE_CACHE.get(key);
+  if (cached !== undefined) return cached.clone() as TRet<Bitmap>;
+  const size = info.size.encode(ver);
+  let b = new Bitmap(size + 2);
+  // Finder patterns
+  // We draw full pattern and later slice, since before addition of borders finder is truncated by one pixel on sides
+  const finder = new Bitmap(3).rect(0, 3, true).border(1, false).border(1, true).border(1, false);
+  b = b
+    .embed(0, finder) // top left
+    .embed({ x: -finder.width, y: 0 }, finder) // top right
+    .embed({ x: 0, y: -finder.height }, finder); // bottom left
+  b = b.rectSlice(1, size);
+  // Alignment patterns
+  const align = new Bitmap(1).rect(0, 1, true).border(1, false).border(1, true);
+  const alignPos = info.alignmentPatterns(ver);
+  for (const y of alignPos) {
+    for (const x of alignPos) {
+      if (b.isDefined(x, y)) continue;
+      b.embed({ x: x - 2, y: y - 2 }, align); // center of pattern should be at position
+    }
+  }
+  // Timing patterns
+  b = b
+    .hLine({ x: 0, y: 6 }, Infinity, ({ x }) => (b.isDefined(x, 6) ? undefined : x % 2 == 0))
+    .vLine({ x: 6, y: 0 }, Infinity, ({ y }) => (b.isDefined(6, y) ? undefined : y % 2 == 0));
+  drawInfo(b, ver, ecc, maskIdx, test);
+  TEMPLATE_CACHE.set(key, b);
+  return b.clone() as TRet<Bitmap>;
 }
 // Walk undefined data modules in the QR two-column zigzag order from the
 // lower right, skipping function patterns and the vertical timing column.
@@ -1538,9 +1633,9 @@ function zigzag(
 function detectType(str: string): EncodingType {
   let type: EncodingType = 'numeric';
   for (let x of str) {
-    if (info.alphabet.numeric.has(x)) continue;
+    if (alphabetValue(NUMERIC_VALUES, x) !== -1) continue;
     type = 'alphanumeric';
-    if (!info.alphabet.alphanumerc.has(x)) return 'byte';
+    if (alphabetValue(ALPHANUMERIC_VALUES, x) === -1) return 'byte';
   }
   return type;
 }
@@ -1577,45 +1672,69 @@ function encode(
   type: EncodingType,
   encoder: TArg<(value: string) => Uint8Array> = utf8ToBytes
 ): TRet<Uint8Array> {
-  let encoded = '';
   let dataLen = data.length;
+  let encodedBits = 0;
+  let utf8: Uint8Array | undefined;
   if (type === 'numeric') {
-    const t = info.alphabet.numeric.decode(data.split(''));
-    const n = t.length;
-    for (let i = 0; i < n - 2; i += 3) encoded += bin(t[i] * 100 + t[i + 1] * 10 + t[i + 2], 10);
-    if (n % 3 === 1) {
-      encoded += bin(t[n - 1], 4);
-    } else if (n % 3 === 2) {
-      encoded += bin(t[n - 2] * 10 + t[n - 1], 7);
-    }
+    validateAlphabetString(NUMERIC_VALUES, data, NUMERIC_ALPHABET);
+    const rem = dataLen % 3;
+    encodedBits = Math.floor(dataLen / 3) * 10 + (rem === 1 ? 4 : rem === 2 ? 7 : 0);
   } else if (type === 'alphanumeric') {
-    const t = info.alphabet.alphanumerc.decode(data.split(''));
-    const n = t.length;
-    for (let i = 0; i < n - 1; i += 2) encoded += bin(t[i] * 45 + t[i + 1], 11);
-    if (n % 2 == 1) encoded += bin(t[n - 1], 6); // pad if odd number of chars
+    validateAlphabetString(ALPHANUMERIC_VALUES, data, ALPHANUMERIC_ALPHABET);
+    encodedBits = Math.floor(dataLen / 2) * 11 + (dataLen % 2 === 1 ? 6 : 0);
   } else if (type === 'byte') {
     // The default encoder is intentionally UTF-8-without-ECI; see utf8ToBytes().
-    const utf8 = encoder(data);
+    utf8 = validateEncodedBytes(encoder(data), 'opts.textEncoder');
     dataLen = utf8.length;
-    encoded = Array.from(utf8)
-      .map((i) => bin(i, 8))
-      .join('');
+    encodedBits = dataLen * 8;
   } else {
     throw new Error('encode: unsupported type');
   }
   const { capacity } = info.capacity(ver, ecc);
-  const len = bin(dataLen, info.lengthBits(ver, type));
-  let bits = info.modeBits[type] + len + encoded;
-  if (bits.length > capacity) throw new Error('Capacity overflow');
-  // Terminator
-  bits += '0'.repeat(Math.min(4, Math.max(0, capacity - bits.length)));
-  // Pad bits string untill full byte
-  if (bits.length % 8) bits += '0'.repeat(8 - (bits.length % 8));
-  // Add padding until capacity is full
-  const padding = '1110110000010001';
-  for (let idx = 0; bits.length !== capacity; idx++) bits += padding[idx % padding.length];
-  // Convert a bitstring to array of bytes
-  const bytes = Uint8Array.from(bits.match(/(.{8})/g)!.map((i) => Number(`0b${i}`)));
+  const lengthBits = info.lengthBits(ver, type);
+  if (dataLen >= 1 << lengthBits) throw new Error('Capacity overflow');
+  let bitPos = 4 + lengthBits + encodedBits;
+  if (bitPos > capacity) throw new Error('Capacity overflow');
+  const bytes = new Uint8Array(capacity >>> 3);
+  bitPos = writeBits(bytes, 0, MODE_BITS[type], 4);
+  bitPos = writeBits(bytes, bitPos, dataLen, lengthBits);
+  if (type === 'numeric') {
+    let i = 0;
+    for (; i < dataLen - 2; i += 3) {
+      const n0 = checkedAlphabetValue(NUMERIC_VALUES, data[i], NUMERIC_ALPHABET);
+      const n1 = checkedAlphabetValue(NUMERIC_VALUES, data[i + 1], NUMERIC_ALPHABET);
+      const n2 = checkedAlphabetValue(NUMERIC_VALUES, data[i + 2], NUMERIC_ALPHABET);
+      bitPos = writeBits(bytes, bitPos, n0 * 100 + n1 * 10 + n2, 10);
+    }
+    if (i < dataLen) {
+      const n0 = checkedAlphabetValue(NUMERIC_VALUES, data[i], NUMERIC_ALPHABET);
+      if (i + 1 === dataLen) {
+        bitPos = writeBits(bytes, bitPos, n0, 4);
+      } else {
+        const n1 = checkedAlphabetValue(NUMERIC_VALUES, data[i + 1], NUMERIC_ALPHABET);
+        bitPos = writeBits(bytes, bitPos, n0 * 10 + n1, 7);
+      }
+    }
+  } else if (type === 'alphanumeric') {
+    let i = 0;
+    for (; i < dataLen - 1; i += 2) {
+      const n0 = checkedAlphabetValue(ALPHANUMERIC_VALUES, data[i], ALPHANUMERIC_ALPHABET);
+      const n1 = checkedAlphabetValue(ALPHANUMERIC_VALUES, data[i + 1], ALPHANUMERIC_ALPHABET);
+      bitPos = writeBits(bytes, bitPos, n0 * 45 + n1, 11);
+    }
+    if (i < dataLen) {
+      const n0 = checkedAlphabetValue(ALPHANUMERIC_VALUES, data[i], ALPHANUMERIC_ALPHABET);
+      bitPos = writeBits(bytes, bitPos, n0, 6);
+    }
+  } else if (utf8 !== undefined) {
+    for (let i = 0; i < utf8.length; i++) bitPos = writeBits(bytes, bitPos, utf8[i], 8);
+  }
+  // Terminator and byte-alignment bits are zero-filled by Uint8Array allocation.
+  bitPos += Math.min(4, capacity - bitPos);
+  if (bitPos & 7) bitPos += 8 - (bitPos & 7);
+  for (let i = bitPos >>> 3, pad = 0; i < bytes.length; i++, pad ^= 1) {
+    bytes[i] = pad ? 0x11 : 0xec;
+  }
   return interleave(ver, ecc).encode(bytes) as TRet<Uint8Array>;
 }
 
@@ -1701,15 +1820,24 @@ function drawQRBest(
   maskIdx?: Mask
 ): TRet<Bitmap> {
   if (maskIdx === undefined) {
-    const bestMask = best<Mask>();
+    let bestMask: Mask | undefined;
+    let bestScore = Infinity;
+    let bestQR: Bitmap | undefined;
     // ISO/IEC 18004:2024 §7.8.3.1 says mask penalty area is "the complete symbol",
     // but python-qrcode scores this placeholder form. Keep that output for compatibility
     // with common QR generators and to avoid fingerprinting this implementation.
-    for (let mask = 0; mask < PATTERNS.length; mask++)
-      bestMask.add(penalty(drawQR(ver, ecc, data, mask as Mask, true)), mask as Mask);
-    maskIdx = bestMask.get();
+    for (let mask = 0; mask < PATTERNS.length; mask++) {
+      const candidate = drawQR(ver, ecc, data, mask as Mask, true) as Bitmap;
+      const score = penalty(candidate);
+      if (score >= bestScore) continue;
+      bestScore = score;
+      bestMask = mask as Mask;
+      bestQR = candidate;
+    }
+    if (bestMask === undefined || bestQR === undefined) throw new Error('Cannot find mask');
+    drawInfo(bestQR, ver, ecc, bestMask);
+    return bestQR as TRet<Bitmap>;
   }
-  if (maskIdx === undefined) throw new Error('Cannot find mask'); // Should never happen
   return drawQR(ver, ecc, data, maskIdx);
 }
 

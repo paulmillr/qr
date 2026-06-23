@@ -429,6 +429,29 @@ should('encodeQR rejects non-positive and unsafe border sizes', () => {
   );
 });
 
+should('encodeQR validates explicit mode data before capacity', () => {
+  throws(
+    () => encodeQR('A'.repeat(100), 'raw', { version: 1, encoding: 'numeric' }),
+    new Error('Unknown letter: "A". Allowed: 0123456789')
+  );
+  throws(
+    () => encodeQR('a'.repeat(100), 'raw', { version: 1, encoding: 'alphanumeric' }),
+    new Error('Unknown letter: "a". Allowed: 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:')
+  );
+});
+
+should('encodeQR rejects invalid byte encoder output', () => {
+  throws(
+    () =>
+      encodeQR('abc', 'raw', {
+        encoding: 'byte',
+        version: 1,
+        textEncoder: (() => new Set([65, 66, 67])) as unknown as (text: string) => Uint8Array,
+      }),
+    new TypeError('"opts.textEncoder" expected Uint8Array, got type=object')
+  );
+});
+
 should('Full API test', () => {
   const q = encodeQR('#️⃣🧜‍♂️🏎🔍🔻', 'ascii');
   const exp = `
