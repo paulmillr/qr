@@ -280,7 +280,7 @@ const percent = (a, b) => `${((a / b) * 100).toFixed(2)}%`;
 // How vectors were selected:
 // 1. Parseable by zxing
 // 2. When not parseable by zxing, but parseable by us, they were verified/added manually
-const DECODED = {
+export const DECODED = {
   blurred: {
     'image007.jpg': ['https://www.surveymonkey.com/s/TheClubatLAS_T3'],
     'image011.jpg': ['HTTPS://NUTS.COM/QR/retail_piece/51707477?sku=7030-01'],
@@ -516,6 +516,32 @@ const DECODED = {
   },
 };
 
+export const DECODE_VECTOR_EXCLUDE = [
+  'blurred/image025.jpg',
+  'curved/image015.jpg',
+  'curved/image022.jpg',
+  'curved/image049.jpg',
+  'glare/image050.jpg',
+  'nominal/image020.jpg',
+  'nominal/image021.jpg',
+  'nominal/image022.jpg',
+  'nominal/image023.jpg',
+  'nominal/image055.jpg',
+  'perspective/image001.jpg',
+  'perspective/image002.jpg',
+  'perspective/image003.jpg',
+  'perspective/image004.jpg',
+  'perspective/image005.jpg',
+  'perspective/image006.jpg',
+  'perspective/image007.jpg',
+  'rotations/image017.jpg',
+  'rotations/image018.jpg',
+  'rotations/image023.jpg',
+  'rotations/image040.jpg',
+  'shadows/image007.jpg',
+  'shadows/image008.jpg',
+];
+
 for (const category of listFiles(DETECTION_PATH, true)) {
   const DIR_PATH = `${DETECTION_PATH}/${category}`;
   should(`Decoding/${category}`, () => {
@@ -525,32 +551,7 @@ for (const category of listFiles(DETECTION_PATH, true)) {
     for (const f of listFiles(DIR_PATH)) {
       if (!f.endsWith('.jpg')) continue;
       const p = `detection/${category}/${f}`;
-      const EXCLUDE = [
-        'blurred/image025.jpg',
-        'curved/image015.jpg',
-        'curved/image022.jpg',
-        'curved/image049.jpg',
-        'glare/image050.jpg',
-        'nominal/image020.jpg',
-        'nominal/image021.jpg',
-        'nominal/image022.jpg',
-        'nominal/image023.jpg',
-        'nominal/image055.jpg',
-        'perspective/image001.jpg',
-        'perspective/image002.jpg',
-        'perspective/image003.jpg',
-        'perspective/image004.jpg',
-        'perspective/image005.jpg',
-        'perspective/image006.jpg',
-        'perspective/image007.jpg',
-        'rotations/image017.jpg',
-        'rotations/image018.jpg',
-        'rotations/image023.jpg',
-        'rotations/image040.jpg',
-        'shadows/image007.jpg',
-        'shadows/image008.jpg',
-      ];
-      if (EXCLUDE.some((end) => p.endsWith(end))) continue;
+      if (DECODE_VECTOR_EXCLUDE.some((end) => p.endsWith(end))) continue;
       count += 1;
       // Slow as hell, but at least doesn't force binary modules for nodejs in dev env
       const jpg = readJPEG(p);

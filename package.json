@@ -36,6 +36,7 @@
     "bundle": "npx --no @paulmillr/jsbt bundle test/build",
     "check": "npx --no @paulmillr/jsbt check",
     "bench": "cd test/benchmark && npm ci && node index.ts",
+    "bench:quality": "node test/benchmark/decode-quality.ts",
     "format": "prettier --write src",
     "test": "node --no-warnings test/index.ts",
     "test:bun": "bun test/index.ts",

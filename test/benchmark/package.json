@@ -6,7 +6,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "bench": "node index.ts"
+    "bench": "node index.ts",
+    "quality": "node decode-quality.ts"
   },
   "keywords": [],
   "author": "",
