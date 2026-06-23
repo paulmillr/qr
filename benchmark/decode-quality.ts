@@ -3,12 +3,12 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join as pjoin } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
-import decodeQR from '../../src/decode.ts';
+import decodeQR from '../src/decode.ts';
 // Reuse the curated expectations from decode tests; should.runWhen keeps tests idle on import.
-import { DECODED, DECODE_VECTOR_EXCLUDE } from '../decode.test.ts';
+import { DECODED, DECODE_VECTOR_EXCLUDE } from '../test/decode.test.ts';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
-const DETECTION_PATH = pjoin(_dirname, '..', 'vectors', 'boofcv-v3', 'detection');
+const DETECTION_PATH = pjoin(_dirname, '..', 'test', 'vectors', 'boofcv-v3', 'detection');
 
 const listFiles = (path, isDir = false) =>
   readdirSync(path)

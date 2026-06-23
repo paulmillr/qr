@@ -13,7 +13,9 @@ import { fileURLToPath } from 'node:url';
 import * as qrcodeGenerator from 'qrcode-generator';
 
 const decodeExp = 'https://www.surveymonkey.com/s/TheClubatLAS_T3';
-const decodeJPG = jpeg.decode(readFileSync('../vectors/boofcv-v3/detection/blurred/image007.jpg'));
+const decodeJPG = jpeg.decode(
+  readFileSync('../../test/vectors/boofcv-v3/detection/blurred/image007.jpg')
+);
 
 // Compared to other JS libraries:
 // - Don't work: [jsQR](https://github.com/cozmo/jsQR) is dead, [zxing-js](https://github.com/zxing-js/) is [dead](https://github.com/zxing-js/library/commit/b797504c25454db32aa2db410e6502b6db12a401), [qr-scanner](https://github.com/nimiq/qr-scanner/) uses jsQR, doesn't work outside of browser, [qcode-decoder](https://github.com/cirocosta/qcode-decoder) broken version of jsQR, doesn't work outside of browser
@@ -97,7 +99,7 @@ async function main() {
 
   section('Decoding quality');
   const _dirname = dirname(fileURLToPath(import.meta.url));
-  const DETECTION_PATH = pjoin(_dirname, '..', 'vectors', 'boofcv-v3', 'detection');
+  const DETECTION_PATH = pjoin(_dirname, '..', '..', 'test', 'vectors', 'boofcv-v3', 'detection');
 
   for (const category of listFiles(DETECTION_PATH, true)) {
     const DIR_PATH = `${DETECTION_PATH}/${category}`;
