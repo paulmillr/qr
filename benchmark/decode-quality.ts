@@ -1,11 +1,11 @@
-import * as jpeg from 'jpeg-js';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { dirname, join as pjoin } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import decodeQR from '../src/decode.ts';
 // Reuse the curated expectations from decode tests; should.runWhen keeps tests idle on import.
 import { DECODED, DECODE_VECTOR_EXCLUDE } from '../test/decode.test.ts';
+import { isDecodeImage, readImage } from '../test/utils.ts';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const DETECTION_PATH = pjoin(_dirname, '..', 'test', 'vectors', 'boofcv-v3', 'detection');
@@ -34,12 +34,12 @@ const select = (envName, values) => {
 function vectorFiles(category) {
   const dir = pjoin(DETECTION_PATH, category);
   return listFiles(dir)
-    .filter((file) => file.endsWith('.jpg'))
+    .filter(isDecodeImage)
     .filter((file) => !DECODE_VECTOR_EXCLUDE.includes(`${category}/${file}`))
     .map((file) => ({
       category,
       file,
-      path: pjoin(dir, file),
+      path: pjoin('detection', category, file),
       expected: DECODED[category]?.[file],
     }));
 }
@@ -61,7 +61,7 @@ function runCategory(files) {
     if (vector.expected) stats.expected++;
     let decoded;
     try {
-      decoded = decodeQR(jpeg.decode(readFileSync(vector.path)));
+      decoded = decodeQR(readImage(vector.path), { moreEffort: true });
     } catch {
       stats.errors++;
     }

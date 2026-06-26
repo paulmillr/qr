@@ -4,7 +4,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join as pjoin } from 'node:path';
 import readQR, { _TESTS, _tests, type DecodeOpts } from '../src/decode.ts';
 import { Bitmap, encodeQR } from '../src/index.ts';
-import { DETECTION_PATH, readJPEG } from './utils.ts';
+import { DETECTION_PATH, isDecodeImage, readImage, readJPEG } from './utils.ts';
 
 const textDecoderWithEci: DecodeOpts = {
   textDecoder: (bytes, eci) => new TextDecoder().decode(bytes) + (eci?.toString() || ''),
@@ -114,6 +114,10 @@ should('decodeQR validates textDecoder option before decoding', () => {
     () => readQR(img, { textDecoder: 1 as never }),
     new Error('invalid opts.textDecoder=1 (number)')
   );
+  throws(
+    () => readQR(img, { moreEffort: 1 as never }),
+    new Error('invalid opts.moreEffort=1 (number)')
+  );
 });
 
 should('decodeQR downsamples bordered monochrome rasters', () => {
@@ -122,6 +126,87 @@ should('decodeQR downsamples bordered monochrome rasters', () => {
   const bmp = _tests.toBitmap(img);
   deepStrictEqual([bmp.width, bmp.height], [raw.length, raw.length]);
   deepStrictEqual(readQR(img), 'HELLO WORLD');
+});
+
+should('decodeQR fallback works with diagnostic hooks', () => {
+  const img = readJPEG('detection/rotations/image017.jpg');
+  const expected =
+    'ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789';
+  let detectedPoints = 0;
+  let bitmapImages = 0;
+  let detectImages = 0;
+  let resultImages = 0;
+  throws(() => readQR(img), new Error('Finder: len(found) = 0'));
+  const res = readQR(img, {
+    moreEffort: true,
+    pointsOnDetect: (points) => {
+      deepStrictEqual(points.length, 4);
+      detectedPoints++;
+    },
+    imageOnBitmap: () => {
+      bitmapImages++;
+    },
+    imageOnDetect: () => {
+      detectImages++;
+    },
+    imageOnResult: () => {
+      resultImages++;
+    },
+  });
+  deepStrictEqual(res, expected);
+  deepStrictEqual(detectedPoints > 0, true);
+  deepStrictEqual(bitmapImages > 0, true);
+  deepStrictEqual(detectImages > 0, true);
+  deepStrictEqual(resultImages > 0, true);
+});
+
+should('decodeQR fallback maps diagnostic points to original image coordinates', () => {
+  const img = readJPEG('detection/blurred/image025.jpg');
+  let detectedPoints;
+  const res = readQR(img, {
+    moreEffort: true,
+    pointsOnDetect: (points) => {
+      detectedPoints = points;
+    },
+  });
+  deepStrictEqual(res, 'http://www.boschautoparts.com/qr/icon.aspx');
+  deepStrictEqual(detectedPoints.length, 4);
+  for (const point of detectedPoints) {
+    deepStrictEqual(point.x >= 0 && point.x < img.width, true);
+    deepStrictEqual(point.y >= 0 && point.y < img.height, true);
+  }
+  deepStrictEqual(
+    detectedPoints.map((point) => Math.round(point.moduleSize)),
+    [4, 4, 4, 4]
+  );
+});
+
+should('decodeQR fallback propagates user callback errors', () => {
+  const img = readJPEG('detection/blurred/image025.jpg');
+  const textDecoderError = new Error('custom text decoder failed');
+  try {
+    readQR(img, {
+      moreEffort: true,
+      textDecoder: () => {
+        throw textDecoderError;
+      },
+    });
+    throw new Error('expected textDecoder to throw');
+  } catch (e) {
+    deepStrictEqual(e, textDecoderError);
+  }
+  const pointsError = new Error('points hook failed');
+  try {
+    readQR(img, {
+      moreEffort: true,
+      pointsOnDetect: () => {
+        throw pointsError;
+      },
+    });
+    throw new Error('expected pointsOnDetect to throw');
+  } catch (e) {
+    deepStrictEqual(e, pointsError);
+  }
 });
 
 const alignmentBitmap = () => {
@@ -333,9 +418,12 @@ export const DECODED = {
     'image036.jpg': ['VERSION 2 8CM'],
   },
   curved: {
+    'image002.png': ['https://www.facebook.com/elyucateco'],
+    'image003.png': ['https://www.facebook.com/elyucateco'],
+    'image004.png': ['https://www.facebook.com/elyucateco'],
     'image008.jpg': ['http://albtsn.com/ugtezn8'],
     'image009.jpg': ['http://albtsn.com/ugtezn8'],
-    'image015.jpg': ['hudson'],
+    'image015.jpg': ['hudson', 'Test 03'],
     'image022.jpg': ['Test 03'],
     'image025.jpg': ['正宗铁观音茶叶 乐品乐茶 \nhttp://detail.tmall.com/item.htm?id=13996190738'],
     'image027.jpg': ['IPN:J68574-001 D/C:2017/10/13'],
@@ -457,7 +545,17 @@ export const DECODED = {
     'image065.jpg': ['GH69-28945C'],
   },
   noncompliant: {},
-  pathological: {},
+  pathological: {
+    'image005.png': ['MAILTO:name@myemail.com'],
+    'image007.png': ['MAILTO:name@myemail.com'],
+    'image012.png': ['MAILTO:name@myemail.com'],
+    'image013.png': ['MAILTO:name@myemail.com'],
+    'image015.png': ['MAILTO:name@myemail.com'],
+    'image018.png': ['MAILTO:name@myemail.com'],
+    'image020.png': ['MAILTO:name@myemail.com'],
+    'image021.png': ['MAILTO:name@myemail.com'],
+    'image023.png': ['MAILTO:name@myemail.com'],
+  },
   perspective: {
     'image001.jpg': ['TEST 10 CM'],
     'image002.jpg': ['TEST 10 CM'],
@@ -498,11 +596,17 @@ export const DECODED = {
       'Version 1 QR',
       'ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789',
     ],
-    'image023.jpg': ['Version 2 QR Code Test Image'],
+    'image023.jpg': [
+      'Version 2 QR Code Test Image',
+      'ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789',
+    ],
     'image024.jpg': ['Version 2 QR Code Test Image'],
     'image034.jpg': ['Version 2 QR Code Test Image'],
     'image039.jpg': ['Version 2 QR Code Test Image'],
-    'image040.jpg': ['Version 2 QR Code Test Image'],
+    'image040.jpg': [
+      'Version 2 QR Code Test Image',
+      'ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789 ABC 123456789',
+    ],
     'image044.jpg': ['Version 2 QR Code Test Image'],
   },
   shadows: {
@@ -516,31 +620,7 @@ export const DECODED = {
   },
 };
 
-export const DECODE_VECTOR_EXCLUDE = [
-  'blurred/image025.jpg',
-  'curved/image015.jpg',
-  'curved/image022.jpg',
-  'curved/image049.jpg',
-  'glare/image050.jpg',
-  'nominal/image020.jpg',
-  'nominal/image021.jpg',
-  'nominal/image022.jpg',
-  'nominal/image023.jpg',
-  'nominal/image055.jpg',
-  'perspective/image001.jpg',
-  'perspective/image002.jpg',
-  'perspective/image003.jpg',
-  'perspective/image004.jpg',
-  'perspective/image005.jpg',
-  'perspective/image006.jpg',
-  'perspective/image007.jpg',
-  'rotations/image017.jpg',
-  'rotations/image018.jpg',
-  'rotations/image023.jpg',
-  'rotations/image040.jpg',
-  'shadows/image007.jpg',
-  'shadows/image008.jpg',
-];
+export const DECODE_VECTOR_EXCLUDE: string[] = [];
 
 for (const category of listFiles(DETECTION_PATH, true)) {
   const DIR_PATH = `${DETECTION_PATH}/${category}`;
@@ -549,12 +629,12 @@ for (const category of listFiles(DETECTION_PATH, true)) {
     let hadDecoded = 0;
     let currDecoded = 0;
     for (const f of listFiles(DIR_PATH)) {
-      if (!f.endsWith('.jpg')) continue;
+      if (!isDecodeImage(f)) continue;
       const p = `detection/${category}/${f}`;
       if (DECODE_VECTOR_EXCLUDE.some((end) => p.endsWith(end))) continue;
       count += 1;
       // Slow as hell, but at least doesn't force binary modules for nodejs in dev env
-      const jpg = readJPEG(p);
+      const img = readImage(p);
       let decoded = DECODED[category][f];
       if (decoded !== undefined) hadDecoded++;
       // Skip files for which we don't have decoded information
@@ -562,7 +642,7 @@ for (const category of listFiles(DETECTION_PATH, true)) {
       // console.log('Decoding', p.replace(DIR, ''));
       let res;
       try {
-        res = readQR(jpg);
+        res = readQR(img, { moreEffort: true });
       } catch (e) {
         //console.log('TEST ERR', e);
       }

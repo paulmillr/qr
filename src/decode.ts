@@ -76,7 +76,6 @@ const pointNeg = (p: Point) => ({ x: -p.x, y: -p.y });
 const pointMirror = (p: Point) => ({ x: p.y, y: p.x });
 const pointClone = (p: Point) => ({ x: p.x, y: p.y });
 const pointInt = (p: Point) => ({ x: int(p.x), y: int(p.y) });
-const pointAdd = (a: Point, b: Point) => ({ x: a.x + b.x, y: a.y + b.y });
 // Count trailing zeroes in a packed bitmap word so scanLine can skip whole
 // runs instead of testing one bit at a time.
 const ctz32 = (v: number) => {
@@ -1415,6 +1414,14 @@ export type DecodeOpts = {
   /** Crop rectangular inputs to a centered square before decoding. */
   cropToSquare?: boolean;
   /**
+   * Try rotated, cropped, and upscaled fallback candidates after the primary
+   * decode attempt fails.
+   *
+   * Disabled by default because these retries can be much slower on hard
+   * failures.
+   */
+  moreEffort?: boolean;
+  /**
    * Custom byte-to-text decoder used for byte segments.
    *
    * Receives the byte segment and, when needed, the active ECI designator.
@@ -1456,6 +1463,39 @@ export type DecodeOpts = {
   imageOnResult?: (img: Image) => void;
 };
 
+type PointMapping = Point & { moduleSize?: number };
+type PointMapper = (point: PointMapping) => PointMapping;
+type DecodeCandidate = { image: Image; mapPoint: PointMapper };
+type CandidateVisitor = (candidate: DecodeCandidate) => boolean;
+
+class UserDecodeError extends Error {
+  error: unknown;
+  constructor(error: unknown) {
+    super('user decode callback failed');
+    this.error = error;
+  }
+}
+
+const pointMapping = (
+  point: PointMapping,
+  x: number,
+  y: number,
+  moduleSize = point.moduleSize
+): PointMapping => {
+  const mapped: PointMapping = { x, y };
+  if (moduleSize !== undefined) mapped.moduleSize = moduleSize;
+  return mapped;
+};
+const identityPoint: PointMapper = (point) => pointMapping(point, point.x, point.y);
+const isUserDecodeError = (e: unknown): e is UserDecodeError => e instanceof UserDecodeError;
+const callUser = <T>(fn: () => T): T => {
+  try {
+    return fn();
+  } catch (e) {
+    throw new UserDecodeError(e);
+  }
+};
+
 // Center-crop to a square and return the original-image offset so
 // `decodeQR()` can map detected points back into caller coordinates.
 function cropToSquare(img: TArg<Image>) {
@@ -1476,6 +1516,247 @@ function cropToSquare(img: TArg<Image>) {
     croppedData.set(data.subarray(srcPos, srcPos + length), dstPos);
   }
   return { offset, img: { height: squareSize, width: squareSize, data: croppedData } };
+}
+
+function cropImageWithOffset(
+  img: TArg<Image>,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+) {
+  const image = img as Image;
+  const data = Array.isArray(image.data) ? new Uint8Array(image.data) : image.data;
+  const bytesPerPixel = getBytesPerPixel(image);
+  const srcWidth = image.width;
+  const srcHeight = image.height;
+  const left = int(cap(Math.round(x), 0, srcWidth - 1));
+  const top = int(cap(Math.round(y), 0, srcHeight - 1));
+  const cropWidth = int(cap(Math.round(width), 1, srcWidth - left));
+  const cropHeight = int(cap(Math.round(height), 1, srcHeight - top));
+  const croppedData = new Uint8Array(cropWidth * cropHeight * bytesPerPixel);
+  for (let yy = 0; yy < cropHeight; yy++) {
+    const srcPos = ((top + yy) * srcWidth + left) * bytesPerPixel;
+    const dstPos = yy * cropWidth * bytesPerPixel;
+    croppedData.set(data.subarray(srcPos, srcPos + cropWidth * bytesPerPixel), dstPos);
+  }
+  return {
+    offset: { x: left, y: top },
+    img: { height: cropHeight, width: cropWidth, data: croppedData },
+  };
+}
+
+function rotateImage(img: TArg<Image>, degrees: 0 | 90 | 180 | 270) {
+  const image = img as Image;
+  const data = Array.isArray(image.data) ? new Uint8Array(image.data) : image.data;
+  if (degrees === 0) return { height: image.height, width: image.width, data };
+  const bytesPerPixel = getBytesPerPixel(image);
+  const width = degrees === 180 ? image.width : image.height;
+  const height = degrees === 180 ? image.height : image.width;
+  const rotatedData = new Uint8Array(width * height * bytesPerPixel);
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
+      let dstX;
+      let dstY;
+      if (degrees === 90) {
+        dstX = image.height - 1 - y;
+        dstY = x;
+      } else if (degrees === 180) {
+        dstX = image.width - 1 - x;
+        dstY = image.height - 1 - y;
+      } else {
+        dstX = y;
+        dstY = image.width - 1 - x;
+      }
+      const srcPos = (y * image.width + x) * bytesPerPixel;
+      const dstPos = (dstY * width + dstX) * bytesPerPixel;
+      rotatedData.set(data.subarray(srcPos, srcPos + bytesPerPixel), dstPos);
+    }
+  }
+  return { height, width, data: rotatedData };
+}
+
+function scaleNearestImage(img: TArg<Image>, scale: number) {
+  const image = img as Image;
+  const data = Array.isArray(image.data) ? new Uint8Array(image.data) : image.data;
+  const bytesPerPixel = getBytesPerPixel(image);
+  const width = Math.round(image.width * scale);
+  const height = Math.round(image.height * scale);
+  const scaledData = new Uint8Array(width * height * bytesPerPixel);
+  for (let y = 0; y < height; y++) {
+    const srcY = Math.min(image.height - 1, Math.floor(y / scale));
+    for (let x = 0; x < width; x++) {
+      const srcX = Math.min(image.width - 1, Math.floor(x / scale));
+      const srcPos = (srcY * image.width + srcX) * bytesPerPixel;
+      const dstPos = (y * width + x) * bytesPerPixel;
+      scaledData.set(data.subarray(srcPos, srcPos + bytesPerPixel), dstPos);
+    }
+  }
+  return { height, width, data: scaledData };
+}
+
+function cropCandidate(
+  candidate: DecodeCandidate,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): DecodeCandidate {
+  const { img, offset } = cropImageWithOffset(candidate.image, x, y, width, height);
+  return {
+    image: img,
+    mapPoint: (point) =>
+      candidate.mapPoint(pointMapping(point, point.x + offset.x, point.y + offset.y)),
+  };
+}
+
+function cropCenteredSquareCandidate(candidate: DecodeCandidate) {
+  const image = candidate.image;
+  const squareSize = Math.min(image.height, image.width);
+  return cropCandidate(
+    candidate,
+    (image.width - squareSize) / 2,
+    (image.height - squareSize) / 2,
+    squareSize,
+    squareSize
+  );
+}
+
+function rotateCandidate(candidate: DecodeCandidate, degrees: 0 | 90 | 180 | 270): DecodeCandidate {
+  const image = candidate.image;
+  const rotated = rotateImage(image, degrees);
+  const localMap: PointMapper = (point) => {
+    if (degrees === 90) return pointMapping(point, point.y, image.height - 1 - point.x);
+    if (degrees === 180)
+      return pointMapping(point, image.width - 1 - point.x, image.height - 1 - point.y);
+    if (degrees === 270) return pointMapping(point, image.width - 1 - point.y, point.x);
+    return identityPoint(point);
+  };
+  return { image: rotated, mapPoint: (point) => candidate.mapPoint(localMap(point)) };
+}
+
+function scaleNearestCandidate(candidate: DecodeCandidate, scale: number): DecodeCandidate {
+  return {
+    image: scaleNearestImage(candidate.image, scale),
+    mapPoint: (point) =>
+      candidate.mapPoint(
+        pointMapping(
+          point,
+          point.x / scale,
+          point.y / scale,
+          point.moduleSize === undefined ? undefined : point.moduleSize / scale
+        )
+      ),
+  };
+}
+
+function visitRotatedImageCandidates(candidate: DecodeCandidate, visit: CandidateVisitor): boolean {
+  for (const degrees of [90, 180, 270, 0] as const) {
+    const rotated = rotateCandidate(candidate, degrees);
+    if (degrees !== 0 && visit(rotated)) return true;
+    const squared = cropCenteredSquareCandidate(rotated);
+    if (
+      squared.image.width !== rotated.image.width ||
+      squared.image.height !== rotated.image.height
+    ) {
+      if (visit(squared)) return true;
+    }
+  }
+  return false;
+}
+
+function windowCrop(
+  candidate: DecodeCandidate,
+  widthFrac: number,
+  heightFrac: number,
+  xFrac: number,
+  yFrac: number
+) {
+  const image = candidate.image;
+  const width = image.width * widthFrac;
+  const height = image.height * heightFrac;
+  return cropCandidate(
+    candidate,
+    (image.width - width) * xFrac,
+    (image.height - height) * yFrac,
+    width,
+    height
+  );
+}
+
+function visitFallbackWindowCandidates(base: DecodeCandidate, visit: CandidateVisitor): boolean {
+  for (const [widthFrac, heightFrac, xFrac, yFrac] of [
+    [0.75, 0.55, 0, 0],
+    [0.65, 0.45, 0, 0.4],
+  ] as const) {
+    if (visitRotatedImageCandidates(windowCrop(base, widthFrac, heightFrac, xFrac, yFrac), visit))
+      return true;
+  }
+  return false;
+}
+
+function visitFallbackImageCandidates(img: TArg<Image>, visit: CandidateVisitor): boolean {
+  const image = img as Image;
+  const base: DecodeCandidate = { image, mapPoint: identityPoint };
+  const area = image.width * image.height;
+  // Keep retries off the hot path and bounded: small blurred labels benefit
+  // from nearest-neighbor upscaling, while 2-4MP multi-QR scenes need window
+  // crops before full-frame rotations to avoid locking onto a smaller code.
+  if (area <= 150_000) {
+    const found = visitRotatedImageCandidates(base, (candidate) => {
+      if (visit(scaleNearestCandidate(candidate, 2))) return true;
+      return visit(scaleNearestCandidate(candidate, 3));
+    });
+    if (found) return true;
+  }
+  if (area >= 2_000_000 && area <= 4_000_000) {
+    if (visitFallbackWindowCandidates(base, visit)) return true;
+    return visitRotatedImageCandidates(base, visit);
+  }
+  if (visitRotatedImageCandidates(base, visit)) return true;
+  return visitFallbackWindowCandidates(base, visit);
+}
+
+function decodePreparedImage(
+  image: TArg<Image>,
+  options: DecodeOpts,
+  mapPoint: PointMapper = identityPoint
+) {
+  const bmp = toBitmap(image) as Bitmap;
+  if (options.imageOnBitmap) callUser(() => options.imageOnBitmap!(bmp.toImage()));
+  const { bits, points } = detect(bmp);
+  if (options.pointsOnDetect) {
+    // Report finder points in the caller's image coordinate space.
+    const p = points.map((i) => ({ ...i, ...mapPoint(i) })) as FinderPoints;
+    callUser(() => options.pointsOnDetect!(p));
+  }
+  if (options.imageOnDetect) callUser(() => options.imageOnDetect!(bits.toImage()));
+  const userTextDecoder = options.textDecoder as
+    | ((bytes: Uint8Array, eci?: number) => string)
+    | undefined;
+  const textDecoder: TArg<(bytes: Uint8Array, eci: number) => string> | undefined =
+    userTextDecoder === undefined
+      ? undefined
+      : (bytes: Uint8Array, eci: number) => callUser(() => userTextDecoder(bytes, eci));
+  const res = decodeBitmap(bits, textDecoder);
+  if (options.imageOnResult) callUser(() => options.imageOnResult!(bits.toImage()));
+  return res;
+}
+
+function decodeWithFallback(image: TArg<Image>, options: DecodeOpts, mapPoint: PointMapper) {
+  let decoded: string | undefined;
+  visitFallbackImageCandidates(image, (candidate) => {
+    try {
+      decoded = decodePreparedImage(candidate.image, options, (point) =>
+        mapPoint(candidate.mapPoint(point))
+      );
+      return true;
+    } catch (e) {
+      if (isUserDecodeError(e)) throw e;
+      return false;
+    }
+  });
+  return decoded;
 }
 
 /**
@@ -1507,6 +1788,8 @@ export function decodeQR(img: TArg<Image>, opts: TArg<DecodeOpts> = {}): string 
     throw new Error(`invalid image.data=${data} (${typeof data})`);
   if (options.cropToSquare !== undefined && typeof options.cropToSquare !== 'boolean')
     throw new Error(`invalid opts.cropToSquare=${options.cropToSquare}`);
+  if (options.moreEffort !== undefined && typeof options.moreEffort !== 'boolean')
+    throw new Error(`invalid opts.moreEffort=${options.moreEffort} (${typeof options.moreEffort})`);
   // Validate callbacks before decoding so payload mode does not decide whether
   // an invalid public option is accepted.
   for (const fn of [
@@ -1521,18 +1804,23 @@ export function decodeQR(img: TArg<Image>, opts: TArg<DecodeOpts> = {}): string 
   }
   let offset = { x: 0, y: 0 };
   if (options.cropToSquare) ({ img: image, offset } = cropToSquare(image));
-  const bmp = toBitmap(image) as Bitmap;
-  if (options.imageOnBitmap) options.imageOnBitmap(bmp.toImage());
-  const { bits, points } = detect(bmp);
-  if (options.pointsOnDetect) {
-    // Report finder points in the caller's original coordinate space after any center-crop.
-    const p = points.map((i) => ({ ...i, ...pointAdd(i, offset) })) as FinderPoints;
-    options.pointsOnDetect(p);
+  const mapPoint: PointMapper = (point) =>
+    pointMapping(point, point.x + offset.x, point.y + offset.y);
+  try {
+    return decodePreparedImage(image, options, mapPoint);
+  } catch (e) {
+    if (isUserDecodeError(e)) throw e.error;
+    if (options.moreEffort) {
+      try {
+        const retry = decodeWithFallback(image, options, mapPoint);
+        if (retry !== undefined) return retry;
+      } catch (fallbackError) {
+        if (isUserDecodeError(fallbackError)) throw fallbackError.error;
+        throw fallbackError;
+      }
+    }
+    throw e;
   }
-  if (options.imageOnDetect) options.imageOnDetect(bits.toImage());
-  const res = decodeBitmap(bits, options.textDecoder);
-  if (options.imageOnResult) options.imageOnResult(bits.toImage());
-  return res;
 }
 
 /**
