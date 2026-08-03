@@ -241,30 +241,52 @@ Future plans:
 
 ## Speed
 
-Benchmarks measured with Apple M4 with node.js 25.
+Benchmarks measured with Apple M4 Pro with node.js 25.
+All numbers are ops/sec (higher is better); 🥇 marks the fastest library in each column.
+Encoders run at ECC level M; an empty cell means the library can't produce that output format natively.
 
-```
-# encode format=ascii
-@paulmillr/qr x 9,050 ops/sec @ 110μs/op
-qrcode-generator x 4,543 ops/sec @ 220μs/op
-nuintun x 3,413 ops/sec @ 292μs/op
+Encoding. Every column encodes the string `HELLO WORLD` (alphanumeric mode), except two:
+_byte_ encodes the URL `https://github.com/paulmillr/qr` — its lowercase letters force 8-bit
+byte mode, since QR's alphanumeric charset only has digits, uppercase and a few symbols —
+and _large_ encodes 768 alphanumeric characters. The columns differ in output format:
 
-# encode format=gif
-@paulmillr/qr x 8,439 ops/sec @ 118μs/op
-qrcode-generator x 2,909 ops/sec @ 343μs/op
-nuintun x 3,470 ops/sec @ 288μs/op
+- **raw**: the library's native matrix / bitmap object (also used for _byte_ and _large_)
+- **ascii**: text rendering for terminals
+- **svg**: SVG string
+- **data-url**: base64 `data:image` URL — note the image format differs per library:
+  PNG for qrcode and lean-qr, GIF for qrcode-generator and nuintun
 
-# encode of large qr
-@paulmillr/qr x 334 ops/sec @ 2ms/op
-qrcode-generator x 174 ops/sec @ 5ms/op
-nuintun x 221 ops/sec @ 4ms/op
+| library            |       raw | raw (byte) | raw (large) |     ascii |       svg |  data-url |
+| ------------------ | --------: | ---------: | ----------: | --------: | --------: | --------: |
+| @paulmillr/qr      |     9,010 |      4,613 |         287 |     9,285 |     8,635 |           |
+| [qrcode-generator] |     5,433 |      2,392 |         170 |     5,272 |     5,539 |     5,042 |
+| [nuintun]          |    19,268 |      8,165 |         443 |           |           |     4,280 |
+| [qrcode]           |    24,417 |  🥇 11,405 |         927 | 🥇 24,421 | 🥇 23,508 |     2,129 |
+| [uqr]              |     6,682 |      3,445 |         319 |     6,554 |     6,338 |           |
+| [lean-qr]          | 🥇 24,492 |     11,283 |    🥇 1,155 |    24,183 |    10,487 | 🥇 20,319 |
 
-# decode
-@paulmillr/qr x 662 ops/sec @ 1ms/op
-jsqr x 50 ops/sec @ 19ms/op
-nuintun x 49 ops/sec @ 20ms/op
-instascan x 128 ops/sec @ 7ms/op ± 31.44% (4ms..166ms)
-```
+Decoding a blurred 756×1008 photo of a QR code:
+
+| library          | decode | avg time |
+| ---------------- | -----: | -------: |
+| @paulmillr/qr    | 🥇 654 |      1ms |
+| [jsqr]           |     48 |     20ms |
+| [nuintun]        |    195 |      5ms |
+| [zxing-wasm]     |    269 |      3ms |
+| [@zxing/library] |    348 |      2ms |
+| [zbar-wasm]      |     65 |     15ms |
+| [instascan]      |    140 |      7ms |
+
+[qrcode-generator]: https://github.com/kazuhikoarase/qrcode-generator
+[nuintun]: https://github.com/nuintun/qrcode
+[qrcode]: https://github.com/soldair/node-qrcode
+[uqr]: https://github.com/unjs/uqr
+[lean-qr]: https://github.com/davidje13/lean-qr
+[jsqr]: https://github.com/cozmo/jsQR
+[zxing-wasm]: https://github.com/Sec-ant/zxing-wasm
+[@zxing/library]: https://github.com/zxing-js/library
+[zbar-wasm]: https://github.com/undecaf/zbar-wasm
+[instascan]: https://github.com/schmich/instascan
 
 ## License
 
