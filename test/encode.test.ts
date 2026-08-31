@@ -1,8 +1,65 @@
-import { should } from '@paulmillr/jsbt/test.js';
+import { it } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual } from 'node:assert';
-import { _tests } from '../src/index.ts';
+import {
+    _BYTES as BYTES,
+    _ECC_BLOCKS as ECC_BLOCKS,
+    _WORDS_PER_BLOCK as WORDS_PER_BLOCK,
+    _tests as _enc,
+} from '../src/index.ts';
 
-should('detectType', () => {
+// Adapter over the rewritten encoder's internals.
+const _tests = {
+  detectType: _enc.detectType,
+  encode: (ver, ecc, text, type) =>
+    _enc.encodeData(ver, ecc, text, type, type === 'byte' ? new TextEncoder().encode(text) : undefined),
+};
+
+// BYTES is not stored as a literal in src — it is computed from the
+// data-modules formula. Pin every value against ISO/IEC 18004:2024 Table 1
+// verbatim.
+it('derived BYTES matches ISO Table 1 literals', () => {
+  // prettier-ignore
+  deepStrictEqual(BYTES, [
+    26, 44, 70, 100, 134, 172, 196, 242, 292, 346, 404, 466, 532, 581, 655, 733, 815, 901, 991, 1085,
+    1156, 1258, 1364, 1474, 1588, 1706, 1828, 1921, 2051, 2185, 2323, 2465, 2611, 2761, 2876, 3034, 3196, 3362, 3532, 3706,
+  ], 'BYTES (Table 1)');
+});
+
+// The Table 9 constants can be shipped as charCode strings instead of array
+// literals: one value per printable char (code - 40; all 320 values are
+// 1..81, so chars land in 41..121 and never need escaping), 40 versions per
+// level in low/medium/quartile/high order. Measured on 2026-08-05 against
+// esbuild-bundled entries, that packing saves 530 B of min.js in BOTH the
+// encode-only and decode-only bundles, but only 40-50 B gzipped — gzip
+// already crushes the repetitive literals — so src keeps the readable arrays.
+// This test documents the packing and proves it stays equivalent: it also
+// re-pins all 320 shipped values against an independent encoding of Table 9,
+// so a typo in either representation fails here.
+it('Table 9 packed-string encoding matches shipped literals', () => {
+  const unpackTable = (packed: string) => {
+    const res: Record<string, number[]> = {};
+    ['low', 'medium', 'quartile', 'high'].forEach((lvl, i) => {
+      res[lvl] = Array.from(packed.slice(40 * i, 40 * (i + 1)), (c) => c.charCodeAt(0) - 40);
+    });
+    return res;
+  };
+  deepStrictEqual(
+    unpackTable(
+      '/27<B:<@F:<@BF>@DFDDDDFFBDFFFFFFFFFFFFFF28B:@8:>>BF>>@@DDBBBBDDDDDDDDDDDDDDDDDDD5>:B:@:><@DB@<F@DDBFDFFFFDFFFFFFFFFFFFFF9D>8>DBB@D@D>@@FDDBDF@FFFFFFFFFFFFFFFFFF'
+    ),
+    WORDS_PER_BLOCK,
+    'WORDS_PER_BLOCK (Table 9)'
+  );
+  deepStrictEqual(
+    unpackTable(
+      ")))))****,,,,,..../0011244456789:;;<=>@A)))**,,,---01122356899:<=?ABDEGIKMNPSUWY))**,,..000248498:=<??ACEJJKNPSUX[]`cfil))*,,,-.003388:8;=AAAJFHKMPRUX[^adgjnruy"
+    ),
+    ECC_BLOCKS,
+    'ECC_BLOCKS (Table 9)'
+  );
+});
+
+it('detectType', () => {
   const VECTORS = [
     ['numeric', '12345678'],
     ['alphanumeric', 'HELLO WORLD'], // only upper-case letters can be encoded here
@@ -13,7 +70,7 @@ should('detectType', () => {
   }
 });
 
-should('encodeData', () => {
+it('encodeData', () => {
   const VECTORS = [
     {
       text: '12345678',
@@ -335,4 +392,4 @@ should('encodeData', () => {
   }
 });
 
-should.runWhen(import.meta.url);
+it.runWhen(import.meta.url);
