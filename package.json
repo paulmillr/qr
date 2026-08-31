@@ -1,6 +1,6 @@
 {
   "name": "qr",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Minimal zero-dependency QR generator/reader with terminal, GIF, and SVG output",
   "files": [
     "index.js",

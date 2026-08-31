@@ -1,6 +1,6 @@
 # Changelog for qr
 
-## Unreleased (2026-08-27)
+## 0.7.0 (2026-08-31)
 
 - Decoder: new architecture, focusing on camera latency. 2x more accurate than previous version on BoofCV
 - Decoder: with new `effort` / `timeLimit` knobs and a multi-format `_QRScanner`

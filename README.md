@@ -3,13 +3,13 @@
 Minimal 0-dependency QR code generator & reader.
 
 - 🔒 Auditable, 0-dependency
-- 🏎 [Fast](#speed): up to 80x faster encoding than other JS libraries; up to 65x faster decoding than jsqr (faster than zxing-wasm)
+- 🏎 [Fast](#speed): up to 65x faster encoding/decoding than other JS libraries, faster than zxing-wasm
 - 🔍 High-quality: decodes 58% of BoofCV photo vectors
 - 🏞️ Encoding (generating) supports ASCII, term, gif, data-url and svg codes
 - 📷 Decoding (reading) supports camera feed input, files and non-browser environments
-- 🪶 6KB (gzipped) for encoding, 19.3KB for encoding + decoding
+- 🪶 6KB (gzipped) for encoding, 20KB for encoding + decoding
 
-Check out [Interactive demo](https://paulmillr.com/apps/qr/) & component for React, called [cuer](https://github.com/wevm/cuer).
+Check out [Interactive demo](https://paulmillr.com/apps/qr/); also there is [cuer React Component](https://github.com/wevm/cuer).
 
 ## Usage
 
@@ -17,7 +17,7 @@ Check out [Interactive demo](https://paulmillr.com/apps/qr/) & component for Rea
 
 > `jsr add jsr:@paulmillr/qr`
 
-A standalone file [qr.js](https://github.com/paulmillr/qr/releases) is also available.
+To produce a standalone file, use **bismar**: `npx bismar -b npm:qr/index.js/encodeQR`.
 
 Three entry points — import only what you use (sizes are esbuild-bundled, minified, gzipped):
 
@@ -26,7 +26,6 @@ Three entry points — import only what you use (sizes are esbuild-bundled, mini
 | `qr`             | `encodeQR`                                                      | 5.4KB                    |
 | `qr/decode.js`   | `decodeQR`, `BarcodeDetector`                                   | 7.3KB (11.5KB with `qr`) |
 | `qr/dom.js`      | `QRCanvas`, `rearCamera`, `selfieCamera`, `frameLoop`, `svgToPng`, `gifToPng` | 9.3KB (includes decoder) |
-| `qr/polyfill.js` | `BarcodeDetector`                                               | decoder + 1.4KB          |
 
 - [Encoding](#encoding)
 - [Decoding](#decoding)
@@ -191,27 +190,6 @@ edges.
 
 See `docs/encode.md` and `docs/decode.md` for more details.
 
-We are using BoofCV vectors. But not all of them are equal for webcam decoding:
-
-| category     | why it matters on a webcam                                                 |
-| ------------ | -------------------------------------------------------------------------- |
-| blurred      | P1: focus-hunting is _the_ dominant webcam failure mode                    |
-| bright_spots | P2: LED/spotlight hotspots; overlaps glare, rarer                          |
-| brightness   | P1: webcam auto-exposure constantly over/undershoots                       |
-| close        | P2: codes shoved inside autofocus range — huge blurry modules              |
-| curved       | P2: codes on bottles/packaging held to the camera                          |
-| damaged      | P2: worn prints exist, but webcam scans skew toward screens/fresh prints   |
-| glare        | P1: specular reflections off glossy prints, phone screens, lamination      |
-| high_version | P3: dense v20+ rarely resolves at 720p regardless of decoder               |
-| lots         | P3: many codes on one sheet — a webcam session aims at _one_ code          |
-| monitor      | P1: codes shown on _screens_ (login/pairing/payment) — the top desktop use |
-| nominal      | P1: the baseline "code held decently in view" case                         |
-| noncompliant | P3: spec-violating codes are rare in the wild                              |
-| pathological | P3: synthetic stress patterns, not camera reality                          |
-| perspective  | P1: nobody holds paper parallel to the lens                                |
-| rotations    | P1: hand-held codes arrive at arbitrary orientation                        |
-| shadows      | P1: the user's own hand/head shadows the held-up code                      |
-
 ## Security
 
 There are multiple ways a single text can be encoded in a QR code, which can lead to potential security implications:
@@ -273,6 +251,27 @@ Measured with `npm run benchmark:quality` on 2026-08:
 
 - qr (this library): 57.5% default, 60.6% with `effort: Infinity, timeLimit: Infinity`
 - zxing-cpp fast mode 50%, slow mode 75%
+
+Not all of the test vectors are equal for webcam decoding:
+
+| category     | why it matters on a webcam                                                 |
+| ------------ | -------------------------------------------------------------------------- |
+| blurred      | P1: focus-hunting is _the_ dominant webcam failure mode                    |
+| bright_spots | P2: LED/spotlight hotspots; overlaps glare, rarer                          |
+| brightness   | P1: webcam auto-exposure constantly over/undershoots                       |
+| close        | P2: codes shoved inside autofocus range — huge blurry modules              |
+| curved       | P2: codes on bottles/packaging held to the camera                          |
+| damaged      | P2: worn prints exist, but webcam scans skew toward screens/fresh prints   |
+| glare        | P1: specular reflections off glossy prints, phone screens, lamination      |
+| high_version | P3: dense v20+ rarely resolves at 720p regardless of decoder               |
+| lots         | P3: many codes on one sheet — a webcam session aims at _one_ code          |
+| monitor      | P1: codes shown on _screens_ (login/pairing/payment) — the top desktop use |
+| nominal      | P1: the baseline "code held decently in view" case                         |
+| noncompliant | P3: spec-violating codes are rare in the wild                              |
+| pathological | P3: synthetic stress patterns, not camera reality                          |
+| perspective  | P1: nobody holds paper parallel to the lens                                |
+| rotations    | P1: hand-held codes arrive at arbitrary orientation                        |
+| shadows      | P1: the user's own hand/head shadows the held-up code                      |
 
 ## License
 
