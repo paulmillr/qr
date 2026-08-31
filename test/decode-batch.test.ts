@@ -210,7 +210,7 @@ it('effort retries another scheduled hypothesis within its time budget', () => {
   );
 });
 
-it('_QRScanner retains max-side arenas and updates only active layer state', () => {
+it('_QRScanner retains rectangular arenas and updates only active layer state', () => {
   const scanner = new _QRScanner({ maxSize: { width: 512, height: 512 } });
   // Luma lengths are the arena contract, so a separate capacity property would be redundant.
   deepStrictEqual(
@@ -273,6 +273,35 @@ it('_QRScanner retains max-side arenas and updates only active layer state', () 
   );
 });
 
+it('_QRScanner sizes every pyramid arena from its rectangular layer dimensions', () => {
+  const scanner = new _QRScanner({ maxSize: { width: 512, height: 256 } });
+  deepStrictEqual(
+    scanner.layers.map(({ bitmap, blocks, cuts, luma, patterns }) => ({
+      bitmap: bitmap.length,
+      blocks: blocks.length,
+      cuts: cuts.length,
+      luma: luma.length,
+      patterns: patterns.length,
+    })),
+    [
+      { bitmap: 16 * 256, blocks: 64 * 32, cuts: 64 * 32, luma: 512 * 256, patterns: 74 * 37 * 4 },
+      { bitmap: 8 * 128, blocks: 32 * 16, cuts: 32 * 16, luma: 256 * 128, patterns: 37 * 19 * 4 },
+      { bitmap: 4 * 64, blocks: 16 * 8, cuts: 16 * 8, luma: 128 * 64, patterns: 19 * 10 * 4 },
+    ]
+  );
+  const skinny = new _QRScanner({ maxSize: { width: 4096, height: 1 } });
+  deepStrictEqual(
+    skinny.layers.map(({ bitmap, blocks, cuts, luma, patterns }) => ({
+      bitmap: bitmap.length,
+      blocks: blocks.length,
+      cuts: cuts.length,
+      luma: luma.length,
+      patterns: patterns.length,
+    })),
+    [{ bitmap: 128, blocks: 512, cuts: 512, luma: 4096, patterns: 586 * 4 }]
+  );
+});
+
 it('_QRScanner reuses phase-disjoint scratch arenas by element width', () => {
   const scanner = new _QRScanner({ maxSize: { width: 512, height: 512 } });
   const state = scanner as unknown as Record<string, unknown>;
@@ -304,20 +333,33 @@ it('_QRScanner reuses phase-disjoint scratch arenas by element width', () => {
 
 it('_QRScanner addImage validates before mutation and clean wipes every arena', () => {
   throws(() => new _QRScanner({ maxSize: { width: 64, height: 64.5 } }), TypeError);
+  throws(() => new _QRScanner({ maxSize: { width: 64, height: 0 } }), /positive/);
+  throws(() => new _QRScanner({ maxSize: { width: 4097, height: 1 } }), /<= 4096/);
+  throws(
+    () => new _QRScanner({ maxSize: { width: 4096, height: 4096 }, stride: 5 }),
+    /arena expected <= 67108864 bytes/
+  );
+  throws(
+    () => decodeQR({ data: new Uint8Array(), width: 4096, height: 0 }),
+    /positive width and height/
+  );
+  throws(() => decodeQR({ data: new Uint8Array(4097 * 3), width: 4097, height: 1 }), /<= 4096/);
   const scanner = new _QRScanner({ maxSize: { width: 128, height: 128 } });
   const valid = image('TRANSACTIONAL', 4);
   scanner.addImage(valid);
   const active = scanner.layers.map(({ height, used, width }) => ({ height, used, width }));
-  scanner.addImage({ data: new Uint8Array(256 * 64), width: 256, height: 64 }, 'I420');
-  deepStrictEqual({ width: scanner.width, height: scanner.height }, { width: 256, height: 64 });
+  throws(
+    () => scanner.addImage({ data: new Uint8Array(256 * 64), width: 256, height: 64 }, 'I420'),
+    /expected dimensions <= 128x128/
+  );
   scanner.addImage(valid);
   throws(
     () => scanner.addImage({ data: new Uint8Array(129 * 128), width: 129, height: 128 }, 'I420'),
-    TypeError
+    RangeError
   );
   throws(
     () => scanner.addImage({ data: new Uint8Array(128 * 129), width: 128, height: 129 }, 'I420'),
-    TypeError
+    RangeError
   );
   deepStrictEqual(
     {

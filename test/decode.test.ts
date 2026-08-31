@@ -213,7 +213,7 @@ it('_QRScanner addImage exposes reusable luma conversion', () => {
 it('_QRScanner processes pixels written directly into its constructor-sized buffer', () => {
   const size = { width: 2, height: 2 };
   const scanner = new _QRScanner({ maxSize: { width: 4, height: 3 }, stride: 4 });
-  deepStrictEqual(scanner.luma.length, 4 * 4 * 4);
+  deepStrictEqual(scanner.luma.length, 4 * 3 * 4);
   scanner.luma.set(Uint8Array.of(4, 8, 12, 255, 20, 24, 28, 0, 36, 40, 44, 255, 52, 56, 60, 0));
   scanner.processImage(size, 'RGBA', { offset: 0, stride: 4 * size.width });
   deepStrictEqual(

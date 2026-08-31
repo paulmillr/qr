@@ -126,6 +126,23 @@ export type _QRPlane = readonly [xShift: 0 | 1, yShift: 0 | 1, bytes: 1 | 2 | 3 
 export type _QRInputFormat = { step: 1 | 2 | 3 | 4; bits: 8 | 10 | 12 };
 type InputFormat = _QRInputFormat;
 
+// Decoder arenas are intended for camera-sized inputs. Keep every dimension and the caller-
+// writable input arena bounded before constructing any typed arrays.
+const MAX_IMAGE_SIDE = 4096;
+const MAX_ARENA_BYTES = 64 * 1024 * 1024;
+
+const validateSize = (size: Size, name: '"img"' | '"maxSize"'): number => {
+  if (!Number.isSafeInteger(size.width) || !Number.isSafeInteger(size.height))
+    throw new TypeError(`${name} expected safe integer width and height`);
+  if (size.width <= 0 || size.height <= 0)
+    throw new RangeError(`${name} expected positive width and height`);
+  if (size.width > MAX_IMAGE_SIDE || size.height > MAX_IMAGE_SIDE)
+    throw new RangeError(
+      `${name} expected width and height <= ${MAX_IMAGE_SIDE}, got ${size.width}x${size.height}`
+    );
+  return size.width * size.height;
+};
+
 // RGBA image from a per-pixel dark predicate (dark -> black).
 function darkToImage(width: number, height: number, dk: (x: number, y: number) => number): Image {
   const data = new Uint8Array(width * height * 4);
@@ -507,12 +524,14 @@ const validateImage = (
   img: Image,
   named?: DecodeFormat,
   layout?: _QRLayout,
-  capacity = Infinity
+  capacity?: Size
 ): InputFormat => {
-  if (!Number.isSafeInteger(img.width) || !Number.isSafeInteger(img.height))
-    throw new TypeError('"img" expected safe integer width and height');
-  const px = img.width * img.height;
-  if (px > capacity) throw new TypeError(`"img" expected area <= ${capacity}, got ${px}`);
+  const px = validateSize(img, '"img"');
+  if (capacity && (img.width > capacity.width || img.height > capacity.height))
+    throw new RangeError(
+      `"img" expected dimensions <= ${capacity.width}x${capacity.height}, ` +
+        `got ${img.width}x${img.height}`
+    );
   const data = img.data as unknown;
   if (!(data instanceof Uint8Array || data instanceof Uint8ClampedArray))
     throw new TypeError(`"img.data" expected Uint8Array or Uint8ClampedArray, got ${typeof data}`);
@@ -555,12 +574,12 @@ const validateImage = (
 };
 const copyLuma = (
   out: Uint8Array,
-  maxPixels: number,
+  maxSize: Size,
   img: Image,
   named?: DecodeFormat,
   layout?: _QRLayout
 ): void => {
-  const { step, bits } = validateImage(img, named, layout, maxPixels);
+  const { step, bits } = validateImage(img, named, layout, maxSize);
   const { width, height, data } = img;
   const stride = layout?.stride || width * step;
   const offset = layout?.offset || 0;
@@ -1056,6 +1075,8 @@ const runDecodeAsync = async <T>(walk: DecodeWalk<T>, timeLimit: number): Promis
 };
 /**
  * Reusable decode state for DOM helpers and advanced integrations.
+ * Operations are exclusive: while `decodeAsync()` is pending, staging, decoding, and cleaning
+ * throw until that promise settles.
  * Most users should call {@link decodeQR} or use the utilities from `qr/dom.js`.
  */
 export class _QRScanner {
@@ -1072,7 +1093,7 @@ export class _QRScanner {
   private readonly payload = Payload.create(BYTES[40 - 1]);
   private readonly image: Luma;
   private readonly input: Image;
-  private readonly maxPixels: number;
+  private inFlight = false;
   private staged = false;
   private resized = false;
   // Finder selection and projection reuse the same typed temporaries by phase. Three homographies
@@ -1109,21 +1130,27 @@ export class _QRScanner {
   private invertedProjection = false;
   private decodedSize = 0;
 
+  private beginOperation(): void {
+    if (this.inFlight) throw new Error('scanner operation already in flight');
+    this.inFlight = true;
+  }
+
+  private endOperation(): void {
+    this.inFlight = false;
+  }
+
   constructor(init: QRScannerOpts) {
     validateOpts(init);
-    if (!Number.isSafeInteger(init.maxSize.width) || !Number.isSafeInteger(init.maxSize.height))
-      throw new TypeError('"maxSize" expected safe integer width and height');
-    const maxPixels = init.maxSize.width * init.maxSize.height;
+    const maxPixels = validateSize(init.maxSize, '"maxSize"');
     const maxSize = Object.freeze({ ...init.maxSize });
-    const maxSide = Math.max(maxSize.width, maxSize.height);
-    const pixels = maxSide * maxSide;
     const stride = init.stride === undefined ? 1 : init.stride;
     if (!Number.isSafeInteger(stride) || stride < 1)
       throw new RangeError(`"stride" expected positive safe integer, got ${stride}`);
-    const bytes = pixels * stride;
-    if (!Number.isSafeInteger(bytes))
-      throw new Error(`expected safe maxSide byte count, got ${maxSide}²*${stride}`);
-    this.maxPixels = maxPixels;
+    const bytes = maxPixels * stride;
+    if (!Number.isSafeInteger(bytes) || bytes > MAX_ARENA_BYTES)
+      throw new RangeError(
+        `input arena expected <= ${MAX_ARENA_BYTES} bytes, got ${maxPixels}*${stride}`
+      );
     this.effort = init.effort === undefined ? 1 : init.effort;
     this.timeLimit = init.timeLimit === undefined ? 1000 / 60 : init.timeLimit;
     this.opts = Object.freeze({
@@ -1138,20 +1165,20 @@ export class _QRScanner {
     this.image = { data: this.luma, height: 0, width: 0 };
     this.input = { data: this.luma, height: 0, width: 0 };
     const layers: ScannerLayer[] = [];
-    let capacity = maxSide;
     let width = maxSize.width;
     let height = maxSize.height;
     for (let i = 0; i < 4; i++) {
-      if (i && capacity < 64) break;
-      const blockSide = Math.ceil(capacity / 8);
-      const centers = Math.ceil(capacity / 7) ** 2;
-      const luma = i ? new Uint8Array(capacity * capacity) : this.luma;
-      const blocks = new Uint8Array(blockSide * blockSide);
-      const cuts = new Int16Array(blockSide * blockSide);
+      if (i && Math.min(width, height) < 64) break;
+      const blockWidth = Math.ceil(width / 8);
+      const blockHeight = Math.ceil(height / 8);
+      const centers = Math.ceil(width / 7) * Math.ceil(height / 7);
+      const luma = i ? new Uint8Array(width * height) : this.luma;
+      const blocks = new Uint8Array(blockWidth * blockHeight);
+      const cuts = new Int16Array(blockWidth * blockHeight);
       // Native-resolution descriptor for fine re-sampling from this layer (undefined on layer 0).
       const fine = i ? { luma: this.image, r: i } : undefined;
       layers.push({
-        bitmap: new Uint32Array(Math.ceil(capacity / 32) * capacity),
+        bitmap: new Uint32Array(Math.ceil(width / 32) * height),
         blockHeight: 0,
         blockWidth: 0,
         blocks,
@@ -1188,7 +1215,6 @@ export class _QRScanner {
         pickLo: 0,
         pickHi: 0,
       });
-      capacity >>= 1;
       width >>= 1;
       height >>= 1;
     }
@@ -1240,8 +1266,13 @@ export class _QRScanner {
 
   /** Convert one source image into the preallocated native luma layer. */
   addImage(img: Image, format: DecodeFormat | undefined = this.opts.format): void {
-    copyLuma(this.luma, this.maxPixels, img, format);
-    this.stage(img);
+    this.beginOperation();
+    try {
+      copyLuma(this.luma, this.opts.maxSize, img, format);
+      this.stage(img);
+    } finally {
+      this.endOperation();
+    }
   }
 
   // Reset every per-image field after copied or direct-written pixels become active.
@@ -1285,35 +1316,40 @@ export class _QRScanner {
   }
 
   clean(): void {
-    this.payload.position = 0;
-    this.payload.bytes.fill(0);
-    // Lifecycle wipe, not per-frame: every typed-array field on the scanner and its layers is
-    // a zero-target arena, so sweep them reflectively — new arenas cannot be forgotten here.
-    // Object.values allocates; acceptable outside the frame loop. Layer zero's luma aliases
-    // the scanner's, so the double fill is harmless.
-    for (const v of Object.values(this)) if (ArrayBuffer.isView(v)) (v as Uint8Array).fill(0);
-    for (const layer of this.layers as ScannerLayer[]) {
-      for (const v of Object.values(layer)) if (ArrayBuffer.isView(v)) (v as Uint8Array).fill(0);
-      layer.blockHeight = 0;
-      layer.blockWidth = 0;
-      layer.height = 0;
-      layer.width = 0;
-      layer.words = 0;
-      layer.patternCount = 0;
-      layer.setCount = 0;
-      layer.setCursor = 0;
-      layer.used = false;
-      layer.found = false;
-      layer.setsReady = false;
+    this.beginOperation();
+    try {
+      this.payload.position = 0;
+      this.payload.bytes.fill(0);
+      // Lifecycle wipe, not per-frame: every typed-array field on the scanner and its layers is
+      // a zero-target arena, so sweep them reflectively — new arenas cannot be forgotten here.
+      // Object.values allocates; acceptable outside the frame loop. Layer zero's luma aliases
+      // the scanner's, so the double fill is harmless.
+      for (const v of Object.values(this)) if (ArrayBuffer.isView(v)) (v as Uint8Array).fill(0);
+      for (const layer of this.layers as ScannerLayer[]) {
+        for (const v of Object.values(layer)) if (ArrayBuffer.isView(v)) (v as Uint8Array).fill(0);
+        layer.blockHeight = 0;
+        layer.blockWidth = 0;
+        layer.height = 0;
+        layer.width = 0;
+        layer.words = 0;
+        layer.patternCount = 0;
+        layer.setCount = 0;
+        layer.setCursor = 0;
+        layer.used = false;
+        layer.found = false;
+        layer.setsReady = false;
+      }
+      this.width = 0;
+      this.image.width = 0;
+      this.height = 0;
+      this.image.height = 0;
+      this.staged = false;
+      this.resized = false;
+      this.blocked = 0;
+      this.points = undefined;
+    } finally {
+      this.endOperation();
     }
-    this.width = 0;
-    this.image.width = 0;
-    this.height = 0;
-    this.image.height = 0;
-    this.staged = false;
-    this.resized = false;
-    this.blocked = 0;
-    this.points = undefined;
   }
 
   /** Process pixels that an integration wrote directly into {@link luma}. */
@@ -1322,10 +1358,15 @@ export class _QRScanner {
     format: DecodeFormat = 'I420',
     layout: _QRLayout = { offset: 0, stride: size.width * (inputFormat(format)?.step || 0) }
   ): void {
-    this.input.width = size.width;
-    this.input.height = size.height;
-    copyLuma(this.luma, this.maxPixels, this.input, format, layout);
-    this.stage(size);
+    this.beginOperation();
+    try {
+      this.input.width = size.width;
+      this.input.height = size.height;
+      copyLuma(this.luma, this.opts.maxSize, this.input, format, layout);
+      this.stage(size);
+    } finally {
+      this.endOperation();
+    }
   }
 
   // Project a module center, then classify its source pixel against the owning threshold block.
@@ -2723,11 +2764,21 @@ export class _QRScanner {
   }
 
   decode(all = false): DecodeResult[] {
-    return runDecode(this.walk(false, all));
+    this.beginOperation();
+    try {
+      return runDecode(this.walk(false, all));
+    } finally {
+      this.endOperation();
+    }
   }
 
-  decodeAsync(all = false): Promise<DecodeResult[]> {
-    return runDecodeAsync(this.walk(true, all), this.timeLimit);
+  async decodeAsync(all = false): Promise<DecodeResult[]> {
+    this.beginOperation();
+    try {
+      return await runDecodeAsync(this.walk(true, all), this.timeLimit);
+    } finally {
+      this.endOperation();
+    }
   }
 }
 
