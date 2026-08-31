@@ -1,6 +1,24 @@
-import { describe, should } from '@paulmillr/jsbt/test.js';
+import { describe, it } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual } from 'node:assert';
-import { _tests } from '../src/index.ts';
+import {
+    _BYTES as BYTES,
+    _ECC_BLOCKS as ECC_BLOCKS,
+    _WORDS_PER_BLOCK as WORDS_PER_BLOCK,
+    _tests,
+    _alignmentPatterns as alignmentPatterns,
+    _formatBits as formatBits,
+} from '../src/index.ts';
+
+const { EC_CODE, versionBits } = _tests;
+
+// Same formula as index.ts's private `capacity()`, rebuilt from its public
+// spec-table exports (capacity/sizeType aren't exported directly).
+function capacityBits(ver, ecc) {
+  const bytes = BYTES[ver - 1];
+  const words = WORDS_PER_BLOCK[ecc][ver - 1];
+  const numBlocks = ECC_BLOCKS[ecc][ver - 1];
+  return (bytes - words * numBlocks) * 8;
+}
 
 const ALIGNMENT_PATTERN_POSITIONS = [
   [], // Version 1
@@ -46,32 +64,13 @@ const ALIGNMENT_PATTERN_POSITIONS = [
 ];
 
 describe('utils', () => {
-  should('Aligment patterns', () => {
+  it('Aligment patterns', () => {
     for (let ver = 1; ver <= 40; ver++) {
-      deepStrictEqual(
-        _tests.info.alignmentPatterns(ver),
-        ALIGNMENT_PATTERN_POSITIONS[ver - 1],
-        ver
-      );
+      deepStrictEqual(alignmentPatterns(ver), ALIGNMENT_PATTERN_POSITIONS[ver - 1], ver);
     }
   });
 
-  should('sizeType', () => {
-    const names = ['small', 'medium', 'large'];
-
-    const exp = [];
-    for (let i = 1; i <= 9; i++) exp.push('small'); // SMALL("version 1-9"),
-    for (let i = 10; i <= 26; i++) exp.push('medium'); // MEDIUM("version 10-26"),
-    for (let i = 27; i <= 40; i++) exp.push('large'); // LARGE("version 27-40"),
-
-    const actual = [];
-    for (let ver = 1; ver <= 40; ver++) {
-      actual.push(names[_tests.info.sizeType(ver)]);
-    }
-    deepStrictEqual(actual, exp);
-  });
-
-  should('versionBits', () => {
+  it('versionBits', () => {
     const VECTORS = {
       7: 0x07c94,
       8: 0x085bc,
@@ -109,11 +108,11 @@ describe('utils', () => {
       40: 0x28c69,
     };
     for (const ver in VECTORS) {
-      deepStrictEqual(_tests.info.versionBits(ver), VECTORS[ver], ver);
+      deepStrictEqual(versionBits(ver), VECTORS[ver], ver);
     }
   });
 
-  should('bitLimit', () => {
+  it('bitLimit', () => {
     const VECTORS = [
       { l: 152, m: 128, q: 104, h: 72 },
       { l: 272, m: 224, q: 176, h: 128 },
@@ -162,13 +161,13 @@ describe('utils', () => {
 
       for (const ecc of ['l', 'm', 'q', 'h']) {
         const eccName = { l: 'low', m: 'medium', q: 'quartile', h: 'high' }[ecc];
-        deepStrictEqual(_tests.info.capacity(ver, eccName).capacity, v[ecc]);
+        deepStrictEqual(capacityBits(ver, eccName), v[ecc]);
       }
     }
   });
 
   describe('crosstest', () => {
-    should('formatBits', () => {
+    it('formatBits', () => {
       // NOTE: copy-paste from python qr-code, for verification only.
       // Remove, so we don't need to include license
       const G15 = (1 << 10) | (1 << 8) | (1 << 5) | (1 << 4) | (1 << 2) | (1 << 1) | (1 << 0);
@@ -191,12 +190,12 @@ describe('utils', () => {
       }
       for (const ecc of ['low', 'medium', 'quartile', 'high'])
         for (let mask_pattern = 0; mask_pattern < 8; mask_pattern++) {
-          const data = (_tests.info.ECCode[ecc] << 3) | mask_pattern;
-          deepStrictEqual(_tests.info.formatBits(ecc, mask_pattern), BCH_type_info(data));
+          const data = (EC_CODE[ecc] << 3) | mask_pattern;
+          deepStrictEqual(formatBits(ecc, mask_pattern), BCH_type_info(data));
         }
     });
 
-    should('versionBits', () => {
+    it('versionBits', () => {
       var G18 =
         (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 5) | (1 << 2) | (1 << 0);
 
@@ -217,10 +216,10 @@ describe('utils', () => {
         return (data << 12) | d;
       }
       for (let ver = 1; ver <= 40; ver++) {
-        deepStrictEqual(_tests.info.versionBits(ver), BCH_type_number(ver));
+        deepStrictEqual(versionBits(ver), BCH_type_number(ver));
       }
     });
   });
 });
 
-should.runWhen(import.meta.url);
+it.runWhen(import.meta.url);

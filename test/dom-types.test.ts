@@ -1,3 +1,5 @@
+// Compile-time-only checks: no runtime tests. `npx tsc` (lint) verifies these
+// option shapes typecheck; the file is intentionally absent from test/index.ts.
 import type { QRCanvasOpts } from '../src/dom.ts';
 
 const textDecoderWithEci: Partial<QRCanvasOpts> = {
