@@ -1,0 +1,11 @@
+name: Run tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    name: jsbt v0.7.2
+    uses: paulmillr/jsbt/.github/workflows/test.yml@84f47b72e990ae11999fbe06c3efa449e943de60
+    with:
+      runs-on: 'ubuntu-24.04'
