@@ -4,7 +4,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./decode.js": "./src/decode.ts",
-    "./dom.js": "./src/dom.ts"
+    "./dom.js": "./src/dom.ts",
+    "./encrypted.js": "./src/encrypted.ts",
+    "./video.js": "./src/video.ts"
   },
   "publish": {
     "include": ["src", "jsr.json", "LICENSE", "README.md"]

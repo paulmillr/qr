@@ -9,11 +9,16 @@
     "decode.d.ts",
     "dom.js",
     "dom.d.ts",
+    "encrypted.js",
+    "encrypted.d.ts",
+    "video.js",
+    "video.d.ts",
     "src",
     "LICENSE",
     "LICENSE-MIT"
   ],
   "devDependencies": {
+    "@noble/ciphers": "2.4.0",
     "@paulmillr/jsbt": "0.7.2",
     "@types/jsdom": "21.1.7",
     "@types/node": "26.3.0",
@@ -43,7 +48,9 @@
   "exports": {
     ".": "./index.js",
     "./decode.js": "./decode.js",
-    "./dom.js": "./dom.js"
+    "./dom.js": "./dom.js",
+    "./encrypted.js": "./encrypted.js",
+    "./video.js": "./video.js"
   },
   "engines": {
     "node": ">= 20.19.0"
