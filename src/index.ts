@@ -959,34 +959,37 @@ function renderGif(r: Raster): Uint8Array<ArrayBuffer> {
   u16(W);
   out[p++] = 0x00;
   out[p++] = 0x07;
-  // Pixels are emitted from a per-module-row 0/1 buffer, rebuilt only when
-  // the module row changes (border and scale-repeated output rows reuse it),
-  // and block-copied in spans bounded by the LZW chunk boundaries. The span
-  // copy is the load-bearing part: a per-pixel emit loop costs more than the
-  // bit extraction it wraps, so a row buffer alone measures as no win.
+  // Pixel rows are built once per module row (border and scale-repeated
+  // output rows reuse the buffer) and block-copied back to back into the
+  // unused tail of the output, then spread forward chunk by chunk: every
+  // chunk lands at or before its source, so the moves never clobber
+  // pixels still to be copied.
   const { m, map } = r;
+  const { words, v } = m;
   const row = new Uint8Array(W);
+  const src = out.length - 4 - pixels;
   let prevMy = -2;
-  for (let y = 0, i = 0; y < W; y++) {
+  for (let y = 0, q = src; y < W; y++, q += W) {
     const my = map[y];
     if (my !== prevMy) {
       prevMy = my;
       row.fill(0);
-      if (my >= 0) for (let x = 0; x < W; x++) if (map[x] >= 0) row[x] = matGet(m, map[x], my);
-    }
-    for (let x = 0; x < W;) {
-      if (i % N === 0) {
-        const rem = pixels - i;
-        out[p++] = (rem < N ? rem : N) + 1;
-        out[p++] = 0x80; // LZW clear code
+      if (my >= 0) {
+        const base = my * words;
+        for (let x = 0; x < W; x++) {
+          const mx = map[x];
+          if (mx >= 0) row[x] = (v[base + (mx >>> 5)] >>> (mx & 31)) & 1;
+        }
       }
-      const n = Math.min(N - (i % N), W - x);
-      // A byte loop: a subarray view per span costs more than the copy.
-      for (let k = 0; k < n; k++) out[p + k] = row[x + k];
-      p += n;
-      x += n;
-      i += n;
     }
+    out.set(row, q);
+  }
+  for (let i = 0, s = src; i < pixels; i += N, s += N) {
+    const n = pixels - i < N ? pixels - i : N;
+    out[p++] = n + 1;
+    out[p++] = 0x80; // LZW clear code
+    out.copyWithin(p, s, s + n);
+    p += n;
   }
   if (tail === 0) {
     out[p++] = 1;
