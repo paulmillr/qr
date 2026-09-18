@@ -809,11 +809,21 @@ const CTRL = [10, 27]; // [newline, ESC]
 const NL = /* @__PURE__ */ String.fromCharCode(CTRL[0]);
 
 function renderRaw(r: Raster): boolean[][] {
-  const W = r.W;
+  const { m, W, map } = r;
   const res: boolean[][] = new Array(W);
+  const { words, v } = m;
   for (let y = 0; y < W; y++) {
+    const my = map[y];
     const row: boolean[] = new Array(W);
-    for (let x = 0; x < W; x++) row[x] = dark(r, x, y);
+    if (my < 0) {
+      for (let x = 0; x < W; x++) row[x] = false;
+    } else {
+      const base = my * words;
+      for (let x = 0; x < W; x++) {
+        const mx = map[x];
+        row[x] = mx >= 0 && ((v[base + (mx >>> 5)] >>> (mx & 31)) & 1) === 1;
+      }
+    }
     res[y] = row;
   }
   return res;
