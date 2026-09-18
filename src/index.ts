@@ -1088,6 +1088,7 @@ export {
   formatBits as _formatBits,
   maskBits as _maskBits,
   popcnt as _popcnt,
+  rsCached as _rsCached,
   versionBits as _versionBits,
 };
 

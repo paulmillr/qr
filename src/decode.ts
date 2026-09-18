@@ -21,6 +21,7 @@ import {
   _formatBits as formatBits,
   _maskBits as maskBits,
   _popcnt as popcnt,
+  _rsCached as rsCached,
   _versionBits as versionBits,
 } from './index.ts';
 
@@ -2201,17 +2202,29 @@ export class _QRScanner {
             correct: {
               // Byte offsets in tmp8: syndromes, sigma, previous, and next. All four are live
               // during Berlekamp-Massey; previous/next become omega/locations afterward.
-              let hasError = false;
+              // The generator divides an intact block: a zero LFSR remainder, computed exactly
+              // as the encoder does from its products table, settles the common case without
+              // syndromes (a zero remainder and all-zero syndromes are the same condition).
+              const products = rsCached(words).mul;
+              const rem = next;
+              const last = words - 1;
+              fun.fill(0, rem, rem + words);
+              for (let i = 0; i < length; i++) {
+                const base = (blockBytes[offset + i] ^ fun[rem]) * words;
+                for (let j = 0; j < last; j++) fun[rem + j] = fun[rem + j + 1] ^ products[base + j];
+                fun[rem + last] = products[base + last];
+              }
+              let dirty = 0;
+              for (let j = 0; j < words; j++) dirty |= fun[rem + j];
+              if (!dirty) {
+                corrected = true;
+                break correct;
+              }
               for (let i = 0; i < words; i++) {
                 let value = 0;
                 for (let j = 0; j < length; j++)
                   value = mul(value, EXP[i]) ^ blockBytes[offset + j];
                 fun[syndromes + i] = value;
-                if (value) hasError = true;
-              }
-              if (!hasError) {
-                corrected = true;
-                break correct;
               }
               fun.fill(0, sigma, sigma + words + 1);
               fun.fill(0, previous, previous + words + 1);
