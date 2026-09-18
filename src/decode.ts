@@ -471,7 +471,7 @@ type ScannerLayer = _QRLayer & {
   readonly plane: Plane;
   readonly context: Ctx;
   found: boolean;
-  readonly inverted: Uint8Array;
+  inverted: Uint8Array;
   readonly sets: Float64Array;
   setCount: number;
   setCursor: number;
@@ -910,6 +910,21 @@ const edgePitch = (layer: ScannerLayer, first: Pattern, second: Pattern, inverte
   const secondPitch = pitch(second);
   return firstPitch && secondPitch ? (firstPitch + secondPitch) / 2 : 0;
 };
+// Double a layer's finder records, up to one per 7x7 cell of the staged frame.
+const growFinders = (layer: ScannerLayer): Float64Array => {
+  const centers = Math.ceil(layer.width / 7) * Math.ceil(layer.height / 7);
+  const count = layer.inverted.length;
+  if (count >= centers)
+    throw new Error(`finder storage exhausted at ${layer.width}x${layer.height}`);
+  const records = Math.min(centers, count * 2);
+  const patterns = new Float64Array(records * 4);
+  patterns.set(layer.patterns);
+  const inverted = new Uint8Array(records);
+  inverted.set(layer.inverted);
+  layer.patterns = patterns;
+  layer.inverted = inverted;
+  return patterns;
+};
 // Confidence (slot 3) stays behind: every consumer reads it straight from the record.
 const copyPattern = (layer: ScannerLayer, index: number, out: Pattern) => {
   const pos = index * 4;
@@ -1198,7 +1213,7 @@ const scanRows = {
           if (cy < 0) break candidate;
           const refinedX = cross(layer, cx, Math.round(cy), 1, 0, limit, inverted);
           if (refinedX < 0) break candidate;
-          const patterns = layer.patterns;
+          let patterns = layer.patterns;
           const polarity = +inverted;
           for (let i = 0; i < layer.patternCount; i++) {
             const pos = i * 4;
@@ -1218,8 +1233,7 @@ const scanRows = {
           }
           const index = layer.patternCount++;
           const pos = index * 4;
-          if (pos + 3 >= patterns.length)
-            throw new Error(`finder storage exhausted at ${layer.width}x${layer.height}`);
+          if (pos + 3 >= patterns.length) patterns = growFinders(layer);
           patterns[pos] = refinedX;
           patterns[pos + 1] = cy;
           patterns[pos + 2] = ms;
@@ -1367,7 +1381,8 @@ export class _QRScanner {
       if (i && Math.min(width, height) < 64) break;
       const blockWidth = Math.ceil(width / 8);
       const blockHeight = Math.ceil(height / 8);
-      const centers = Math.ceil(width / 7) * Math.ceil(height / 7);
+      // Finder records start small and grow on demand, up to one per 7x7 cell.
+      const centers = Math.min(64, Math.ceil(width / 7) * Math.ceil(height / 7));
       const luma = i ? new Uint8Array(width * height) : this.luma;
       const blocks = new Uint8Array(blockWidth * blockHeight);
       const cuts = new Int16Array(blockWidth * blockHeight);
