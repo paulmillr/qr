@@ -975,7 +975,11 @@ const scanRows = {
   find(layer: ScannerLayer, from: number, to: number) {
     // Rolling window over each row's run-length encoding (no per-row arrays):
     // check every 5-run window that starts, centers, and ends on a black run.
-    // run() always advances (previous matches the bit at x by construction).
+    // Each run is measured straight off the packed row: the word's opposite-color bits
+    // are isolated with clz32 and whole words are consumed until a stop or the row's end.
+    const width = layer.width;
+    const words = layer.words;
+    const bitmap = layer.bitmap;
     for (let y = from; y < to; y += 2) {
       let r0 = 0;
       let r1 = 0;
@@ -983,10 +987,22 @@ const scanRows = {
       let r3 = 0;
       let r4 = 0;
       let runs = 0;
-      let previous = !!bit(layer, 0, y | 0);
-      for (let x = 0; x < layer.width;) {
-        const length = run(layer, x, y, 1, 0, +previous, Infinity);
-        x += length;
+      const row = y * words;
+      let previous = (bitmap[row] & 1) === 1;
+      for (let x = 0; x < width;) {
+        let length = 0;
+        for (;;) {
+          const shift = x & 31;
+          const word = bitmap[row + (x >>> 5)];
+          const stops = previous ? ~word : word;
+          const w = stops >> shift;
+          const span = Math.min(32 - shift, width - x);
+          const first = !w ? 32 : 31 - Math.clz32(w & -w);
+          const len = Math.min(first, span);
+          length += len;
+          x += len;
+          if (first < span || x >= width) break;
+        }
         r0 = r1;
         r1 = r2;
         r2 = r3;
@@ -996,7 +1012,9 @@ const scanRows = {
         const black = previous;
         previous = !previous;
         candidate: {
-          if ((runs | 0) < 5) break candidate;
+          // A center run exceeds 1.5 modules and its neighbors fall short of 1.5, so a
+          // center no longer than a neighbor never passes ratio().
+          if ((runs | 0) < 5 || r2 <= r1 || r2 <= r3) break candidate;
           const inverted = !black;
           const ms = ratio(r0, r1, r2, r3, r4);
           if (!ms) break candidate;
