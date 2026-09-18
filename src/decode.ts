@@ -122,7 +122,6 @@ const cap = (value: number, min?: number, max?: number) => {
 const { exp: EXP, log: LOG } = GF256;
 const mul = (a: number, b: number) => (a && b ? EXP[LOG[a] + LOG[b]] : 0);
 const inv = (a: number) => EXP[255 - LOG[a]];
-
 type Luma = { width: number; height: number; data: Uint8Array };
 export type _QRPlane = readonly [xShift: 0 | 1, yShift: 0 | 1, bytes: 1 | 2 | 3 | 4];
 export type _QRInputFormat = { step: 1 | 2 | 3 | 4; bits: 8 | 10 | 12 };
@@ -1242,6 +1241,7 @@ export class _QRScanner {
   private readonly codewords = new Uint8Array(BYTES[40 - 1]);
   private readonly tmp32 = new Uint32Array(4 * 16 * 3 + 16);
   private readonly tmp64 = new Float64Array(7 * 7 * 2 + (7 * 7 - 3) * 4);
+  private readonly remainder = new Int32Array(8);
   private readonly payload = Payload.create(BYTES[40 - 1]);
   private readonly image: Luma;
   private readonly input: Image;
@@ -2245,17 +2245,21 @@ export class _QRScanner {
               // The generator divides an intact block: a zero LFSR remainder, computed exactly
               // as the encoder does from its products table, settles the common case without
               // syndromes (a zero remainder and all-zero syndromes are the same condition).
-              const products = rsCached(words).mul;
-              const rem = next;
-              const last = words - 1;
-              fun.fill(0, rem, rem + words);
+              // Coefficient j lives in byte j & 3 of word j >> 2; the top word's spare bytes shift
+              // in zeros and fold zero products, so they stay zero.
+              const products = rsCached(words).mul32;
+              const rem = this.remainder;
+              const stride = (words + 3) >> 2;
+              const last = stride - 1;
+              rem.fill(0, 0, stride);
               for (let i = 0; i < length; i++) {
-                const base = (blockBytes[offset + i] ^ fun[rem]) * words;
-                for (let j = 0; j < last; j++) fun[rem + j] = fun[rem + j + 1] ^ products[base + j];
-                fun[rem + last] = products[base + last];
+                const base = (blockBytes[offset + i] ^ (rem[0] & 0xff)) * stride;
+                for (let j = 0; j < last; j++)
+                  rem[j] = ((rem[j] >>> 8) | (rem[j + 1] << 24)) ^ products[base + j];
+                rem[last] = (rem[last] >>> 8) ^ products[base + last];
               }
               let dirty = 0;
-              for (let j = 0; j < words; j++) dirty |= fun[rem + j];
+              for (let j = 0; j < stride; j++) dirty |= rem[j];
               if (!dirty) {
                 corrected = true;
                 break correct;
