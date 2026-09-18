@@ -245,8 +245,9 @@ type PayloadState = {
 const Payload = {
   create(capacity: number): PayloadState {
     const bytes = new Uint8Array(capacity);
+    // One prefix view per length, created on first use: a scanner that
+    // never decodes a byte segment of that length never allocates it.
     const views = new Array<Uint8Array>(capacity + 1);
-    for (let i = 0; i < views.length; i++) views[i] = new Uint8Array(bytes.buffer, 0, i);
     let state: PayloadState;
     const read = (bits: number) => {
       const start = state.position;
@@ -332,9 +333,12 @@ const Payload = {
         } else {
           const encoding = ECI_ENCODINGS[eci];
           if (!encoding || length >= state.views.length) return FAIL.data;
+          const view =
+            state.views[length] ??
+            (state.views[length] = new Uint8Array(state.bytes.buffer, 0, length));
           const decoder = ECI_DECODERS[eci] || new TextDecoder(encoding);
           for (let i = 0; i < length; i++) state.bytes[i] = read(8);
-          res += decoder.decode(state.views[length]);
+          res += decoder.decode(view);
         }
       } else return FAIL.data;
     }
