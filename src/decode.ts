@@ -1041,16 +1041,33 @@ const scanRows = {
     const lumaWords = (layer.width & 3) === 0 ? layer.lumaWords : undefined;
     for (let y = from; y < to; y++) {
       const yPos = cap(y * block, 0, maxY);
-      // The historical 5x5 smoother improves perspective coverage.
+      // The historical 5x5 smoother improves perspective coverage. Its window is clamped
+      // two blocks inside either edge, so it slides one column at a time between them:
+      // each step drops the column sum leaving the window and adds the one entering it.
       const top = cap(y, 2, bHeight - 3);
+      const row = bWidth * (top - 2);
+      let c0 = blocks[row] + blocks[row + bWidth] + blocks[row + 2 * bWidth];
+      c0 += blocks[row + 3 * bWidth] + blocks[row + 4 * bWidth];
+      let c1 = blocks[row + 1] + blocks[row + 1 + bWidth] + blocks[row + 1 + 2 * bWidth];
+      c1 += blocks[row + 1 + 3 * bWidth] + blocks[row + 1 + 4 * bWidth];
+      let c2 = blocks[row + 2] + blocks[row + 2 + bWidth] + blocks[row + 2 + 2 * bWidth];
+      c2 += blocks[row + 2 + 3 * bWidth] + blocks[row + 2 + 4 * bWidth];
+      let c3 = blocks[row + 3] + blocks[row + 3 + bWidth] + blocks[row + 3 + 2 * bWidth];
+      c3 += blocks[row + 3 + 3 * bWidth] + blocks[row + 3 + 4 * bWidth];
+      let c4 = blocks[row + 4] + blocks[row + 4 + bWidth] + blocks[row + 4 + 2 * bWidth];
+      c4 += blocks[row + 4 + 3 * bWidth] + blocks[row + 4 + 4 * bWidth];
+      let sum = c0 + c1 + c2 + c3 + c4;
       for (let x = 0; x < bWidth; x++) {
         const xPos = cap(x * block, 0, maxX);
-        const left = cap(x, 2, bWidth - 3);
-        let sum = 0;
-        for (let yy = -2; yy <= 2; yy++) {
-          const row = bWidth * (top + yy) + left;
-          sum +=
-            blocks[row - 2] + blocks[row - 1] + blocks[row] + blocks[row + 1] + blocks[row + 2];
+        if (x > 2 && x <= bWidth - 3) {
+          const col = row + x + 2;
+          c0 = c1;
+          c1 = c2;
+          c2 = c3;
+          c3 = c4;
+          c4 = blocks[col] + blocks[col + bWidth] + blocks[col + 2 * bWidth];
+          c4 += blocks[col + 3 * bWidth] + blocks[col + 4 * bWidth];
+          sum = c0 + c1 + c2 + c3 + c4;
         }
         const average = sum / 25;
         const cut = Math.floor(average);
