@@ -2167,25 +2167,42 @@ export class _QRScanner {
             }
           const bytes = this.codewords;
           const total = BYTES[ver - 1];
-          bytes.fill(0, 0, total);
+          const limit = 8 * total;
+          const grid = this.grid;
           let bit = 0;
+          let acc = 0;
           let dir = -1;
           let y = size - 1;
           for (let xOffset = size - 1; xOffset > 0; xOffset -= 2) {
             if (xOffset === 6) xOffset = 6 - 1;
+            // Mask predicates repeat every 12 rows: pack one period per column into a word.
+            let mask0 = 0;
+            let mask1 = 0;
+            for (let i = 0; i < 12; i++) {
+              mask0 |= ((maskBits(xOffset, i) >> mask) & 1) << i;
+              mask1 |= ((maskBits(xOffset - 1, i) >> mask) & 1) << i;
+            }
+            let ym = y % 12;
             for (;;) {
+              const row = y * size;
               for (let j = 0; j < 2; j++) {
                 const x = xOffset - j;
-                if (fun[y * size + x]) continue;
-                if (
-                  bit < 8 * total &&
-                  (this.grid[y * size + x] ^ ((maskBits(x, y) >> mask) & 1)) === 1
-                )
-                  bytes[bit >> 3] |= 0x80 >> (bit & 7);
+                if (fun[row + x]) continue;
+                // Codewords fill in walk order, so each byte lands whole after its eighth bit.
+                if (bit < limit) {
+                  acc = (acc << 1) | (grid[row + x] ^ (((j ? mask1 : mask0) >> ym) & 1));
+                  if ((bit & 7) === 7) {
+                    bytes[bit >> 3] = acc;
+                    acc = 0;
+                  }
+                }
                 bit++;
               }
               if (y + dir < 0 || y + dir >= size) break;
               y += dir;
+              ym += dir;
+              if (ym < 0) ym = 11;
+              else if (ym === 12) ym = 0;
             }
             dir = -dir;
           }
