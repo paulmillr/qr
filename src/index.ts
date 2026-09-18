@@ -930,7 +930,8 @@ function renderGif(r: Raster): Uint8Array<ArrayBuffer> {
         out[p++] = 0x80; // LZW clear code
       }
       const n = Math.min(N - (i % N), W - x);
-      out.set(row.subarray(x, x + n), p);
+      // A byte loop: a subarray view per span costs more than the copy.
+      for (let k = 0; k < n; k++) out[p + k] = row[x + k];
       p += n;
       x += n;
       i += n;
