@@ -181,50 +181,53 @@ function rsGenerator(eccWords: number): Uint8Array {
   return gen;
 }
 
-type RsCache = { gen: Uint8Array; mul: Uint8Array };
+type RsCache = { gen: Uint8Array; mul: Uint8Array; mul32: Int32Array };
 const RS_CACHE: (RsCache | undefined)[] = [];
 
 // Generator and all coefficient*feedback products, shared by every symbol
-// with the same parity length; entries are generated lazily.
+// with the same parity length; entries are generated lazily. `mul32` holds
+// the same products four to a word (coefficient j in byte j & 3 of word
+// j >> 2) for the word-wise remainder loop.
 function rsCached(eccWords: number): RsCache {
   let cached = RS_CACHE[eccWords];
   if (cached !== undefined) return cached;
   const gen = rsGenerator(eccWords);
   const { exp: EXP, log: LOG } = GF256;
   const mul = new Uint8Array(256 * eccWords);
+  const stride = (eccWords + 3) >>> 2;
+  const mul32 = new Int32Array(256 * stride);
   for (let f = 1; f < 256; f++) {
     const lf = LOG[f];
     const off = f * eccWords;
     for (let j = 0; j < eccWords; j++) {
       const c = gen[j];
-      if (c) mul[off + j] = EXP[LOG[c] + lf];
+      if (c) mul32[f * stride + (j >>> 2)] |= (mul[off + j] = EXP[LOG[c] + lf]) << (8 * (j & 3));
     }
   }
-  return (RS_CACHE[eccWords] = { gen, mul });
+  return (RS_CACHE[eccWords] = { gen, mul, mul32 });
 }
 
-// Reed-Solomon parity via LFSR remainder.
-function rsEcc(data: Uint8Array, gen: Uint8Array, mul?: Uint8Array): Uint8Array {
-  const { exp: EXP, log: LOG } = GF256;
+const RS_TMP = /* @__PURE__ */ new Int32Array(8);
+// Reed-Solomon parity via LFSR remainder, four coefficients a word: each
+// data byte shifts the remainder down one byte across the words and XORs
+// in the packed products row of the feedback byte.
+function rsEcc(data: Uint8Array, gen: Uint8Array, mul32: Int32Array): Uint8Array {
   const eccWords = gen.length;
-  const res = new Uint8Array(eccWords);
-  if (mul !== undefined) {
-    const last = eccWords - 1;
-    for (let i = 0; i < data.length; i++) {
-      const off = (data[i] ^ res[0]) * eccWords;
-      for (let j = 0; j < last; j++) res[j] = res[j + 1] ^ mul[off + j];
-      res[last] = mul[off + last];
-    }
-    return res;
-  }
+  const stride = mul32.length >>> 8;
+  const last = stride - 1;
+  const w = RS_TMP.fill(0, 0, stride);
   for (let i = 0; i < data.length; i++) {
-    const f = data[i] ^ res[0];
-    res.copyWithin(0, 1);
-    res[eccWords - 1] = 0;
-    if (f) {
-      for (let j = 0; j < eccWords; j++) if (gen[j]) res[j] ^= EXP[LOG[gen[j]] + LOG[f]];
+    let cur = w[0];
+    const off = (data[i] ^ (cur & 0xff)) * stride;
+    for (let k = 0; k < last; k++) {
+      const next = w[k + 1];
+      w[k] = ((cur >>> 8) | (next << 24)) ^ mul32[off + k];
+      cur = next;
     }
+    w[last] = (cur >>> 8) ^ mul32[off + last];
   }
+  const res = new Uint8Array(eccWords);
+  for (let j = 0; j < eccWords; j++) res[j] = w[j >>> 2] >>> (8 * (j & 3));
   return res;
 }
 
@@ -319,7 +322,7 @@ function encodeData(
   for (let i = 0, pos = 0; i < numBlocks; i++) {
     const len = blockLen + (i < shortBlocks ? 0 : 1);
     blocks.push(bytes.subarray(pos, pos + len));
-    eccs.push(rsEcc(blocks[i], rs.gen, rs.mul));
+    eccs.push(rsEcc(blocks[i], rs.gen, rs.mul32));
     pos += len;
   }
   const res = new Uint8Array(bytes.length + words * numBlocks);
