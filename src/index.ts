@@ -336,7 +336,7 @@ function encodeData(
  * 8-bit vector (bit m set when mask predicate m fires at x,y). Shared with
  * the decoder, which tests a single mask's bit to unmask read modules.
  */
-function maskBits(x: number, y: number): number {
+function maskCalc(x: number, y: number): number {
   const x2 = x % 2;
   const y2 = y % 2;
   const x3 = x % 3;
@@ -352,6 +352,16 @@ function maskBits(x: number, y: number): number {
   if ((xy2 + xy3) % 2 === 0) bits |= 64;
   if (((x2 ^ y2) + xy3) % 2 === 0) bits |= 128;
   return bits;
+}
+// Every predicate is periodic in 6 columns and 12 rows, so the vector is a
+// 72-entry lookup filled once from the arithmetic.
+const MASK_TABLE: Uint8Array = /* @__PURE__ */ (() => {
+  const t = new Uint8Array(72);
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 6; x++) t[y * 6 + x] = maskCalc(x, y);
+  return t;
+})();
+function maskBits(x: number, y: number): number {
+  return MASK_TABLE[(y % 12) * 6 + (x % 6)];
 }
 
 const POP16: Uint8Array = /* @__PURE__ */ (() => {
