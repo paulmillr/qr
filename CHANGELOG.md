@@ -1,5 +1,12 @@
 # Changelog for qr
 
+## Unreleased
+
+- Decoder: 3-5x faster on small symbols and 1.5-2x on camera frames with identical results: word-wise luma conversion, pyramid and binarizer, finder runs walked straight off the packed row with exact early-outs, call-free grid sampling, packed codeword extraction, Reed-Solomon over packed words with syndromes taken from the remainder, and per-call arenas sized to the symbol instead of Version 40
+- Decoder: opt-in `nativeLimit` (and `nativeEvery` in `QRCanvas`) skips the full-resolution finder search on large camera frames
+- Encoder: byte-identical output 10-30% faster for `raw`, `ascii`, `gif` and `data-url`, up to 3x for `svg`
+- DOM: fix the native VideoFrame path being disabled for a stream started before its first frame; do not overwrite the luma arena while an async decode reads it; mute through the property for mobile autoplay
+
 ## 0.7.0 (2026-08-31)
 
 - Decoder: new architecture, focusing on camera latency. 2x more accurate than previous version on BoofCV
