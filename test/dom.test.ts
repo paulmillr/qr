@@ -595,6 +595,7 @@ it(
     try {
       const player = previousCreate('video');
       Object.defineProperties(player, {
+        readyState: { configurable: true, value: 2 },
         videoWidth: { configurable: true, value: 6 },
         videoHeight: { configurable: true, value: 4 },
       });
@@ -1539,6 +1540,7 @@ it('QRCamera decodes padded WebCodecs formats with reusable buffers', async () =
       source = videoFrameSource(format, width, height, luma);
       const player = previousCreate('video');
       Object.defineProperties(player, {
+        readyState: { configurable: true, value: 2 },
         videoWidth: { configurable: true, value: width },
         videoHeight: { configurable: true, value: height },
       });

@@ -1034,6 +1034,9 @@ export class QRCamera {
       this.videoFrame = false;
       return this.draw(canvas, fullSize);
     }
+    // Before the first decoded frame the constructor throws, which the fallback
+    // below would read as missing support; the frame is simply not here yet.
+    if (this.player.readyState < 2) return;
     if (this.reading) return;
     this.reading = true;
     const source = this.source;
