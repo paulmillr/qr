@@ -844,11 +844,19 @@ function renderTerm(r: Raster): string {
   return out;
 }
 
+// Character counts of a path coordinate and of a signed move offset, so the
+// shorter move command is chosen without building both.
+const digits = (n: number): number =>
+  n < 10 ? 1 : n < 100 ? 2 : n < 1000 ? 3 : n < 10000 ? 4 : String(n).length;
+const chars = (d: number): number => (d < 0 ? 1 + digits(-d) : digits(d));
+
 function renderSvg(r: Raster, optimize: boolean): string {
   const W = r.W;
   let out = `<svg viewBox="0 0 ${W} ${W}" xmlns="http://www.w3.org/2000/svg">`;
   let pathData = '';
-  let prev: { x: number; y: number } | undefined;
+  let prevX = 0;
+  let prevY = 0;
+  let hasPrev = false;
   for (let y = 0; y < W; y++) {
     for (let x = 0; x < W; x++) {
       if (!dark(r, x, y)) continue;
@@ -856,13 +864,17 @@ function renderSvg(r: Raster, optimize: boolean): string {
         out += `<rect x="${x}" y="${y}" width="1" height="1" />`;
         continue;
       }
-      let mv = `M${x} ${y}`;
-      if (prev) {
-        const rel = `m${x - prev.x} ${y - prev.y}`;
-        if (rel.length <= mv.length) mv = rel;
-      }
+      // The shorter move wins, relative on ties; only the winner is built.
+      let mv: string;
+      if (hasPrev) {
+        const dx = x - prevX;
+        const dy = y - prevY;
+        mv = chars(dx) + chars(dy) <= digits(x) + digits(y) ? `m${dx} ${dy}` : `M${x} ${y}`;
+      } else mv = `M${x} ${y}`;
       pathData += `${mv}h1v1${x < 10 ? `H${x}` : 'h-1'}Z`;
-      prev = { x, y };
+      prevX = x;
+      prevY = y;
+      hasPrev = true;
     }
   }
   if (optimize) out += `<path d="${pathData}"/>`;
