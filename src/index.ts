@@ -361,31 +361,35 @@ const POP16: Uint8Array = /* @__PURE__ */ (() => {
 })();
 const popcnt = (n: number): number => POP16[n & 0xffff] + POP16[n >>> 16];
 
-const TRANSPOSE_TMP = /* @__PURE__ */ new Uint32Array(32);
+const TRANSPOSE_TMP = /* @__PURE__ */ new Int32Array(32);
 // 32x32 in-place bit-matrix transpose (butterfly network).
-function transpose32(a: Uint32Array): void {
+function transpose32(a: Int32Array): void {
   const masks = [0x55555555, 0x33333333, 0x0f0f0f0f, 0x00ff00ff, 0x0000ffff];
   for (let stage = 0; stage < 5; stage++) {
-    const m = masks[stage] >>> 0;
+    const m = masks[stage];
     const s = 1 << stage;
     for (let i = 0; i < 32; i += s << 1) {
       for (let k = 0; k < s; k++) {
-        const x = a[i + k] >>> 0;
-        const y = a[i + k + s] >>> 0;
+        const x = a[i + k];
+        const y = a[i + k + s];
         const t = ((x >>> s) ^ y) & m;
-        a[i + k] = (x ^ (t << s)) >>> 0;
-        a[i + k + s] = (y ^ t) >>> 0;
+        a[i + k] = x ^ (t << s);
+        a[i + k + s] = y ^ t;
       }
     }
   }
 }
 
-// Packed square bit matrix: LSB-first bits, `words` u32 per row. Bits at
+// Packed square bit matrix: LSB-first bits, `words` i32 per row. Bits at
 // x >= size are kept zero — the penalty scanners rely on that invariant.
-type Mat = { size: number; words: number; v: Uint32Array };
+// Signed words on purpose: every consumer is bitwise or popcount, and a
+// v1 symbol never sets bit 31, so an engine that meets v1 first specializes
+// on int32; the first full word from a Uint32Array then arrives as a double
+// and the recompiled mixed-type code stays slower for the whole process.
+type Mat = { size: number; words: number; v: Int32Array };
 const mat = (size: number): Mat => {
   const words = (size + 31) >>> 5;
-  return { size, words, v: new Uint32Array(words * size) };
+  return { size, words, v: new Int32Array(words * size) };
 };
 const matGet = (m: Mat, x: number, y: number): number =>
   (m.v[y * m.words + (x >>> 5)] >>> (x & 31)) & 1;
@@ -416,12 +420,12 @@ function transposeMat(src: Mat, dst: Mat): void {
 // each run contributes (L-4) windows plus one run-start window counted twice.
 function runsPenaltyVertical(m: Mat): number {
   const { size, words, v } = m;
-  const tail = size & 31 ? ((1 << (size & 31)) - 1) >>> 0 : 0xffffffff;
+  const tail = size & 31 ? ~(-1 << (size & 31)) : -1;
   let score = 0;
   for (let wi = 0; wi < words; wi++) {
-    const valid = wi === words - 1 ? tail : 0xffffffff;
+    const valid = wi === words - 1 ? tail : -1;
     let r3 = v[3 * words + wi];
-    let dPrev = 0xffffffff;
+    let dPrev = -1;
     let d0 = v[wi] ^ v[words + wi];
     let d1 = v[words + wi] ^ v[2 * words + wi];
     let d2 = v[2 * words + wi] ^ r3;
@@ -429,7 +433,7 @@ function runsPenaltyVertical(m: Mat): number {
       const r4 = v[idx];
       const d3 = r3 ^ r4;
       const w = ~(d0 | d1 | d2 | d3) & valid;
-      if (w) score += popcnt(w >>> 0) + 2 * popcnt((w & dPrev) >>> 0);
+      if (w) score += popcnt(w) + 2 * popcnt(w & dPrev);
       dPrev = d0;
       d0 = d1;
       d1 = d2;
@@ -444,10 +448,10 @@ function runsPenaltyVertical(m: Mat): number {
 // both patterns at once across a 32-column stripe.
 function finderPenaltyVertical(m: Mat): number {
   const { size, words, v } = m;
-  const tail = size & 31 ? ((1 << (size & 31)) - 1) >>> 0 : 0xffffffff;
+  const tail = size & 31 ? ~(-1 << (size & 31)) : -1;
   let count = 0;
   for (let wi = 0; wi < words; wi++) {
-    const valid = wi === words - 1 ? tail : 0xffffffff;
+    const valid = wi === words - 1 ? tail : -1;
     for (let y = 0; y <= size - 11; y++) {
       let i = y * words + wi;
       const r0 = v[i];
@@ -463,7 +467,7 @@ function finderPenaltyVertical(m: Mat): number {
       const r10 = v[i + words];
       const m0 = valid & r0 & ~r1 & r2 & r3 & r4 & ~r5 & r6 & ~(r7 | r8 | r9 | r10);
       const m1 = valid & ~(r0 | r1 | r2 | r3) & r4 & ~r5 & r6 & r7 & r8 & ~r9 & r10;
-      count += popcnt(m0 >>> 0) + popcnt(m1 >>> 0);
+      count += popcnt(m0) + popcnt(m1);
     }
   }
   return count;
@@ -487,13 +491,13 @@ function penaltyScore(m: Mat, t: Mat, limit: number = Infinity): number {
   if (adjacent >= limit) return adjacent;
   // N2: 3 points per 2x2 same-color box (overlapping). Valid left-edge
   // positions in the last word: one less than the bits it actually holds.
-  const tail2 = ((1 << (size - 32 * (words - 1) - 1)) - 1) >>> 0;
+  const tail2 = ~(-1 << (size - 32 * (words - 1) - 1));
   let boxes = 0;
   let dark = 0;
   for (let y = 0; y < size; y++) {
     for (let wi = 0; wi < words; wi++) {
       const a0 = v[y * words + wi];
-      dark += popcnt(a0 >>> 0);
+      dark += popcnt(a0);
       if (y === size - 1) continue;
       const a1 = v[(y + 1) * words + wi];
       const n0 = wi + 1 < words ? v[y * words + wi + 1] : 0;
@@ -503,7 +507,7 @@ function penaltyScore(m: Mat, t: Mat, limit: number = Infinity): number {
       const eqH1 = ~(a1 ^ ((a1 >>> 1) | (n1 << 31)));
       let w = eqV & eqH0 & eqH1;
       if (wi === words - 1) w &= tail2;
-      boxes += popcnt(w >>> 0);
+      boxes += popcnt(w);
     }
   }
   const total = size * size;
@@ -550,10 +554,10 @@ function drawInfo(m: Mat, ver: number, ecc: ErrorCorrection, mask: number): void
 // overwhelmingly encode one version repeatedly; worst case (v40) ~190KB.
 type SymCache = {
   ver: number;
-  tpl: Uint32Array;
+  tpl: Int32Array;
   pos: Uint16Array;
-  planes: Uint32Array[];
-  planesT: Uint32Array[];
+  planes: Int32Array[];
+  planesT: Int32Array[];
   work: [Mat, Mat, Mat, Mat];
 };
 let symCache: SymCache | undefined;
