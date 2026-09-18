@@ -109,6 +109,7 @@ export type _QRLayer = {
   width: number;
   words: number;
 };
+const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 const cap = (value: number, min?: number, max?: number) => {
   let result = value;
   if (max !== undefined) result = Math.min(result, max);
@@ -466,6 +467,8 @@ type ScannerTriple = Triple & {
 // A fractional initial value establishes unboxed-double fields before per-frame writes.
 const makePattern = (): Pattern => ({ x: 0.1, y: 0.1, ms: 0.1 });
 type ScannerLayer = _QRLayer & {
+  // Four luma pixels per word for the binarizer; undefined on big-endian hosts.
+  readonly lumaWords: Int32Array | undefined;
   readonly plane: Plane;
   readonly context: Ctx;
   found: boolean;
@@ -904,13 +907,33 @@ const scanRows = {
         let min = 0xff;
         let max = 0;
         let pos = yPos * layer.width + xPos;
+        // Eight pixels per block row, unrolled by hand; `block` is fixed at 8.
         for (let yy = 0; yy < block; yy++) {
-          for (let xx = 0; xx < block; xx++) {
-            const pixel = brightness[pos + xx];
-            sum += pixel;
-            min = Math.min(min, pixel);
-            max = Math.max(max, pixel);
-          }
+          const p0 = brightness[pos];
+          const p1 = brightness[pos + 1];
+          const p2 = brightness[pos + 2];
+          const p3 = brightness[pos + 3];
+          const p4 = brightness[pos + 4];
+          const p5 = brightness[pos + 5];
+          const p6 = brightness[pos + 6];
+          const p7 = brightness[pos + 7];
+          sum += p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7;
+          if (p0 < min) min = p0;
+          if (p1 < min) min = p1;
+          if (p2 < min) min = p2;
+          if (p3 < min) min = p3;
+          if (p4 < min) min = p4;
+          if (p5 < min) min = p5;
+          if (p6 < min) min = p6;
+          if (p7 < min) min = p7;
+          if (p0 > max) max = p0;
+          if (p1 > max) max = p1;
+          if (p2 > max) max = p2;
+          if (p3 > max) max = p3;
+          if (p4 > max) max = p4;
+          if (p5 > max) max = p5;
+          if (p6 > max) max = p6;
+          if (p7 > max) max = p7;
           pos += layer.width;
         }
         let average = Math.floor(sum / block ** 2);
@@ -939,6 +962,8 @@ const scanRows = {
     const maxY = layer.height - block;
     const maxX = layer.width - block;
     const blocks = layer.blocks;
+    // Four pixels per word when rows keep word alignment.
+    const lumaWords = (layer.width & 3) === 0 ? layer.lumaWords : undefined;
     for (let y = from; y < to; y++) {
       const yPos = cap(y * block, 0, maxY);
       // The historical 5x5 smoother improves perspective coverage.
@@ -949,17 +974,42 @@ const scanRows = {
         let sum = 0;
         for (let yy = -2; yy <= 2; yy++) {
           const row = bWidth * (top + yy) + left;
-          for (let xx = -2; xx <= 2; xx++) sum += blocks[row + xx];
+          sum +=
+            blocks[row - 2] + blocks[row - 1] + blocks[row] + blocks[row + 1] + blocks[row + 2];
         }
         const average = sum / 25;
-        layer.cuts[y * bWidth + x] = Math.floor(average);
+        const cut = Math.floor(average);
+        layer.cuts[y * bWidth + x] = cut;
         let pos = yPos * layer.width + xPos;
+        const shift = xPos & 31;
+        let word = yPos * layer.words + (xPos >>> 5);
+        const lowMask = 0xff << shift;
+        // A word-aligned row compares four pixels per word in two 16-bit lanes:
+        // (cut + 256) - v sets lane bit 8 exactly when v <= cut, and no lane borrows
+        // because every difference stays positive.
+        const swar = lumaWords !== undefined && (pos & 3) === 0 && cut >= 0;
+        const lanes = ((cut + 256) << 16) | (cut + 256);
         for (let yy = 0; yy < block; yy++) {
           let value = 0;
-          for (let xx = 0; xx < block; xx++) value |= +(brightness[pos + xx] <= average) << xx;
-          const shift = xPos & 31;
-          const word = (yPos + yy) * layer.words + (xPos >>> 5);
-          const lowMask = 0xff << shift;
+          if (swar) {
+            const w0 = lumaWords[pos >> 2];
+            const w1 = lumaWords[(pos >> 2) + 1];
+            const a = lanes - (w0 & 0x00ff00ff);
+            const b = lanes - ((w0 >>> 8) & 0x00ff00ff);
+            const c = lanes - (w1 & 0x00ff00ff);
+            const d = lanes - ((w1 >>> 8) & 0x00ff00ff);
+            value =
+              ((a >>> 8) & 1) |
+              ((b >>> 7) & 2) |
+              ((a >>> 22) & 4) |
+              ((b >>> 21) & 8) |
+              ((c >>> 4) & 16) |
+              ((d >>> 3) & 32) |
+              ((c >>> 18) & 64) |
+              ((d >>> 17) & 128);
+          } else {
+            for (let xx = 0; xx < block; xx++) value |= +(brightness[pos + xx] <= average) << xx;
+          }
           layer.bitmap[word] = (layer.bitmap[word] & ~lowMask) | (value << shift);
           if (shift > 24) {
             const highMask = (1 << (shift - 24)) - 1;
@@ -967,6 +1017,7 @@ const scanRows = {
               (layer.bitmap[word + 1] & ~highMask) | (value >>> (32 - shift));
           }
           pos += layer.width;
+          word += layer.words;
         }
       }
     }
@@ -1207,6 +1258,9 @@ export class _QRScanner {
         cuts,
         height: 0,
         luma,
+        lumaWords: LITTLE_ENDIAN
+          ? new Int32Array(luma.buffer, luma.byteOffset, luma.length >> 2)
+          : undefined,
         patternCount: 0,
         patterns: new Float64Array(centers * 4),
         used: false,
