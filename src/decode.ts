@@ -746,17 +746,22 @@ const cross = (
 ): number => {
   const center = +!inverted;
   const side = +inverted;
-  let r2 = run(layer, cx, cy, -dx, -dy, center, Infinity);
-  let back = r2;
+  let back = run(layer, cx, cy, -dx, -dy, center, Infinity);
+  const forward = run(layer, cx + dx, cy + dy, dx, dy, center, Infinity);
+  const r2 = back + forward;
+  // ratio() needs a center run over 1.5 modules and every other run under that, so a center
+  // shorter than two bits or no longer than a neighbor fails before the remaining runs.
+  if (r2 < 2) return -1;
   const r1 = run(layer, cx - dx * back, cy - dy * back, -dx, -dy, side, maxMs);
+  if (r1 >= r2) return -1;
   back += r1;
   const r0 = run(layer, cx - dx * back, cy - dy * back, -dx, -dy, center, maxMs);
+  if (r0 >= r2) return -1;
   back += r0;
   const start = (dx ? cx : cy) - back;
-  const forward = run(layer, cx + dx, cy + dy, dx, dy, center, Infinity);
-  r2 += forward;
   let ahead = 1 + forward;
   const r3 = run(layer, cx + dx * ahead, cy + dy * ahead, dx, dy, side, maxMs);
+  if (r3 >= r2) return -1;
   ahead += r3;
   const r4 = run(layer, cx + dx * ahead, cy + dy * ahead, dx, dy, center, maxMs);
   if (!ratio(r0, r1, r2, r3, r4)) return -1;
