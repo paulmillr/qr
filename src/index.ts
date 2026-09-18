@@ -819,15 +819,42 @@ function renderRaw(r: Raster): boolean[][] {
   return res;
 }
 
+// Half-block glyphs by (upper, lower) darkness, and every four-cell
+// sequence of them, so a line grows four glyphs per concatenation.
+const GLYPH = ['█', '▀', '▄', ' '];
+const QUAD: string[] = /* @__PURE__ */ (() => {
+  const t: string[] = [];
+  for (let i = 0; i < 256; i++)
+    t.push(GLYPH[i >> 6] + GLYPH[(i >> 4) & 3] + GLYPH[(i >> 2) & 3] + GLYPH[i & 3]);
+  return t;
+})();
+
 function renderAscii(r: Raster): string {
-  const W = r.W;
+  const { m, W, map } = r;
+  const { words, v } = m;
   let out = '';
   for (let y = 0; y < W; y += 2) {
+    const my0 = map[y];
+    const my1 = y + 1 < W ? map[y + 1] : -2; // past the bottom edge reads dark
+    const b0 = my0 * words;
+    const b1 = my1 * words;
+    let acc = 0;
+    let n = 0;
     for (let x = 0; x < W; x++) {
-      const first = dark(r, x, y);
-      const second = y + 1 >= W ? true : dark(r, x, y + 1);
-      out += !first && !second ? '█' : !first && second ? '▀' : first && !second ? '▄' : ' ';
+      const mx = map[x];
+      let g = my1 === -2 ? 1 : 0;
+      if (mx >= 0) {
+        if (my0 >= 0 && (v[b0 + (mx >>> 5)] >>> (mx & 31)) & 1) g |= 2;
+        if (my1 >= 0 && (v[b1 + (mx >>> 5)] >>> (mx & 31)) & 1) g |= 1;
+      }
+      acc = (acc << 2) | g;
+      if (++n === 4) {
+        out += QUAD[acc];
+        acc = 0;
+        n = 0;
+      }
     }
+    for (let i = 0; i < n; i++) out += GLYPH[(acc >> (2 * (n - 1 - i))) & 3];
     out += NL;
   }
   return out;
