@@ -1895,4 +1895,25 @@ it('decodeQR nativeLimit searches large frames on the half layer only', () => {
   deepStrictEqual(readQR(place(1, 100), { nativeLimit: 0 }), text);
 });
 
+it('decodeQR reads mirror images', () => {
+  // ISO/IEC 18004 expects a reader to read mirror images: a camera plane can arrive mirrored
+  // with no metadata saying so. Mirror a raster and a photo left to right.
+  const mirror = (img: { width: number; height: number; data: Uint8Array }) => {
+    const data = new Uint8Array(img.data.length);
+    const bpp = img.data.length / (img.width * img.height);
+    for (let y = 0; y < img.height; y++)
+      for (let x = 0; x < img.width; x++)
+        for (let c = 0; c < bpp; c++) {
+          const from = (y * img.width + img.width - 1 - x) * bpp + c;
+          data[(y * img.width + x) * bpp + c] = img.data[from];
+        }
+    return { width: img.width, height: img.height, data };
+  };
+  const text = 'MIRROR IMAGE 2026';
+  const raster = matrixToImage(encodeQR(text, 'raw', { border: 4 }), 4);
+  deepStrictEqual(readQR(mirror(raster)), text);
+  const photo = readImage('detection/blurred/image007.jpg');
+  deepStrictEqual(readQR(mirror(photo)), readQR(photo));
+});
+
 it.runWhen(import.meta.url);

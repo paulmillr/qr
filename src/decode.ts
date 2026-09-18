@@ -2174,7 +2174,27 @@ export class _QRScanner {
   }
 
   // Parse format/function bits, deinterleave and correct codewords, then decode the payload.
-  private decodeGrid(size: number, _ctx: Ctx): Attempt {
+  // A mirror image locates like any symbol, since finders and timing are symmetric, and
+  // fails only at the format and data bits, so a failed read is retried on the transposed
+  // grid, which is the upright symbol. The symbology expects a reader to read mirror images;
+  // a camera plane can arrive mirrored with no metadata saying so.
+  private decodeGrid(size: number, ctx: Ctx): Attempt {
+    const result = this.decodeOriented(size, ctx);
+    if (!(result instanceof Error)) return result;
+    const grid = this.grid;
+    for (let y = 1; y < size; y++)
+      for (let x = 0; x < y; x++) {
+        const a = y * size + x;
+        const b = x * size + y;
+        const t = grid[a];
+        grid[a] = grid[b];
+        grid[b] = t;
+      }
+    const mirrored = this.decodeOriented(size, ctx);
+    return mirrored instanceof Error ? result : mirrored;
+  }
+
+  private decodeOriented(size: number, _ctx: Ctx): Attempt {
     let decoded: Attempt = FAIL.format;
     if (!checkVersion(this.grid, size)) decoded = FAIL.version;
     else {
