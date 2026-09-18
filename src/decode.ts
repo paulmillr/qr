@@ -675,15 +675,22 @@ const bit = (layer: ScannerLayer, x: number, y: number) => {
 const ratio = (a: number, b: number, c: number, d: number, e: number) => {
   const total = a + b + c + d + e;
   if (total < 7) return 0;
-  const ms = total / 7;
-  // Half-module tolerance accommodates sampling noise around the three-module center.
-  const tol = ms * 0.5;
-  return Math.abs(ms - a) < tol &&
-    Math.abs(ms - b) < tol &&
-    Math.abs(3 * ms - c) < 3 * tol &&
-    Math.abs(ms - d) < tol &&
-    Math.abs(ms - e) < tol
-    ? ms
+  // Half-module tolerance accommodates sampling noise around the three-module center:
+  // each side run within (0.5, 1.5) modules and the center within (1.5, 4.5), tested on
+  // integer runs as 14 * run against multiples of the seven-module total.
+  const lo = total;
+  const hi = 3 * total;
+  return lo < 14 * a &&
+    14 * a < hi &&
+    lo < 14 * b &&
+    14 * b < hi &&
+    hi < 14 * c &&
+    14 * c < 9 * total &&
+    lo < 14 * d &&
+    14 * d < hi &&
+    lo < 14 * e &&
+    14 * e < hi
+    ? total / 7
     : 0;
 };
 // Consecutive `color` bits from (x,y) inclusive stepping (dx,dy); stops on mismatch, border,
