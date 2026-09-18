@@ -853,28 +853,49 @@ const digits = (n: number): number =>
   n < 10 ? 1 : n < 100 ? 2 : n < 1000 ? 3 : n < 10000 ? 4 : String(n).length;
 const chars = (d: number): number => (d < 0 ? 1 + digits(-d) : digits(d));
 
+// Finished path commands for the two common relative moves (same row, next
+// row) with the `h-1` return, keyed by (dy, dx) for one output width: the
+// coordinates never change between symbols of the same size, so the number
+// formatting is paid once per distinct move.
+let svgCache: { W: number; cmds: string[] } | undefined;
+
 function renderSvg(r: Raster, optimize: boolean): string {
-  const W = r.W;
+  const { m, W, map } = r;
+  const { words, v } = m;
+  if (svgCache === undefined || svgCache.W !== W) svgCache = { W, cmds: new Array(4 * W) };
+  const cmds = svgCache.cmds;
   let out = `<svg viewBox="0 0 ${W} ${W}" xmlns="http://www.w3.org/2000/svg">`;
   let pathData = '';
   let prevX = 0;
   let prevY = 0;
   let hasPrev = false;
   for (let y = 0; y < W; y++) {
+    const my = map[y];
+    if (my < 0) continue;
+    const base = my * words;
     for (let x = 0; x < W; x++) {
-      if (!dark(r, x, y)) continue;
+      const mx = map[x];
+      if (mx < 0 || !((v[base + (mx >>> 5)] >>> (mx & 31)) & 1)) continue;
       if (!optimize) {
         out += `<rect x="${x}" y="${y}" width="1" height="1" />`;
         continue;
       }
       // The shorter move wins, relative on ties; only the winner is built.
-      let mv: string;
-      if (hasPrev) {
-        const dx = x - prevX;
-        const dy = y - prevY;
-        mv = chars(dx) + chars(dy) <= digits(x) + digits(y) ? `m${dx} ${dy}` : `M${x} ${y}`;
-      } else mv = `M${x} ${y}`;
-      pathData += `${mv}h1v1${x < 10 ? `H${x}` : 'h-1'}Z`;
+      const dx = x - prevX;
+      const dy = y - prevY;
+      let cmd: string;
+      if (hasPrev && x >= 10 && dy <= 1 && chars(dx) + 1 <= digits(x) + digits(y)) {
+        const k = (2 * dy + 1) * W + dx;
+        cmd = cmds[k];
+        if (cmd === undefined) cmd = cmds[k] = `m${dx} ${dy}h1v1h-1Z`;
+      } else {
+        let mv: string;
+        if (hasPrev) {
+          mv = chars(dx) + chars(dy) <= digits(x) + digits(y) ? `m${dx} ${dy}` : `M${x} ${y}`;
+        } else mv = `M${x} ${y}`;
+        cmd = `${mv}h1v1${x < 10 ? `H${x}` : 'h-1'}Z`;
+      }
+      pathData += cmd;
       prevX = x;
       prevY = y;
       hasPrev = true;
