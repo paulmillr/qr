@@ -1115,13 +1115,13 @@ const scanRows = {
       let r3 = 0;
       let r4 = 0;
       let runs = 0;
-      const row = y * words;
-      let previous = (bitmap[row] & 1) === 1;
+      let at = y * words;
+      let word = bitmap[at];
+      let shift = 0;
+      let previous = (word & 1) === 1;
       for (let x = 0; x < width;) {
         let length = 0;
         for (;;) {
-          const shift = x & 31;
-          const word = bitmap[row + (x >>> 5)];
           const stops = previous ? ~word : word;
           const w = stops >> shift;
           const span = Math.min(32 - shift, width - x);
@@ -1129,7 +1129,10 @@ const scanRows = {
           const len = Math.min(first, span);
           length += len;
           x += len;
+          shift += len;
           if (first < span || x >= width) break;
+          word = bitmap[++at];
+          shift = 0;
         }
         r0 = r1;
         r1 = r2;
