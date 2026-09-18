@@ -69,6 +69,12 @@ export type DecodeOpts = {
   effort?: number;
   /** Milliseconds available to optional retries; defaults to one 60-FPS frame budget. */
   timeLimit?: number;
+  /**
+   * Skip the finder search on the native layer when its shorter side exceeds this many
+   * pixels: symbols are then found on the half-resolution layer and their modules still
+   * sampled from native luma. Defaults to Infinity (every layer is searched).
+   */
+  nativeLimit?: number;
   /** Custom byte-to-text decoder used for byte segments; receives the active ECI designator. */
   textDecoder?: (bytes: Uint8Array, eci?: number) => string;
   /**
@@ -475,6 +481,8 @@ type ScannerLayer = _QRLayer & {
   readonly lumaWords: Int32Array | undefined;
   readonly plane: Plane;
   readonly context: Ctx;
+  // Finder search runs on this layer; false on a native layer past nativeLimit.
+  search: boolean;
   found: boolean;
   inverted: Uint8Array;
   readonly sets: Float64Array;
@@ -527,6 +535,16 @@ const validateOpts = (opts: DecodeOpts): void => {
     (typeof opts.timeLimit !== 'number' || !Number.isFinite(opts.timeLimit) || opts.timeLimit < 0)
   )
     throw new TypeError(`invalid opts.timeLimit=${opts.timeLimit} (${typeof opts.timeLimit})`);
+  if (
+    opts.nativeLimit !== undefined &&
+    opts.nativeLimit !== Infinity &&
+    (typeof opts.nativeLimit !== 'number' ||
+      !Number.isFinite(opts.nativeLimit) ||
+      opts.nativeLimit < 0)
+  )
+    throw new TypeError(
+      `invalid opts.nativeLimit=${opts.nativeLimit} (${typeof opts.nativeLimit})`
+    );
   for (const name of ['textDecoder', 'pointsOnDetect', 'imageOnResult', 'imageOnBitmap'] as const)
     if (opts[name] !== undefined && typeof opts[name] !== 'function')
       throw new TypeError(`invalid opts.${name}=${opts[name]} (${typeof opts[name]})`);
@@ -1326,6 +1344,8 @@ export class _QRScanner {
   private blocked = 0;
   private readonly effort: number;
   private readonly timeLimit: number;
+  /** Native-layer search gate (see DecodeOpts.nativeLimit); settable between frames. */
+  nativeLimit: number;
   private retryStart = 0;
   private retries = 0;
   private points?: FinderPoints;
@@ -1369,6 +1389,7 @@ export class _QRScanner {
       );
     this.effort = init.effort === undefined ? 1 : init.effort;
     this.timeLimit = init.timeLimit === undefined ? 1000 / 60 : init.timeLimit;
+    this.nativeLimit = init.nativeLimit === undefined ? Infinity : init.nativeLimit;
     this.opts = Object.freeze({
       ...init,
       effort: this.effort,
@@ -1425,6 +1446,7 @@ export class _QRScanner {
           oy: 0,
           fine,
         },
+        search: false,
         found: false,
         inverted: new Uint8Array(centers),
         setCount: 0,
@@ -1518,6 +1540,9 @@ export class _QRScanner {
       const layer = this.layers[i] as ScannerLayer;
       const used = !i || Math.min(aw, ah) >= 64;
       layer.used = used;
+      // A frame too small for a half layer (shorter side under 128) always searches native.
+      layer.search =
+        used && (i > 0 || Math.min(aw, ah) <= this.nativeLimit || Math.min(aw, ah) < 128);
       layer.width = used ? aw : 0;
       layer.height = used ? ah : 0;
       layer.words = used ? Math.ceil(aw / 32) : 0;
@@ -1571,6 +1596,7 @@ export class _QRScanner {
         layer.setCount = 0;
         layer.setCursor = 0;
         layer.used = false;
+        layer.search = false;
         layer.found = false;
         layer.setsReady = false;
       }
@@ -2781,7 +2807,7 @@ export class _QRScanner {
         )
           break walk;
         const layer = layers[i];
-        if (!layer.used) continue;
+        if (!layer.used || !layer.search) continue;
         /**
          * The frame reader has already written grayscale luma. Keeping thresholding on that plane
          * avoids packed-color conversion in the dominant camera path.
