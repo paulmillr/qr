@@ -1477,11 +1477,17 @@ export class _QRScanner {
       this.payload.bytes.fill(0);
       // Lifecycle wipe, not per-frame: every typed-array field on the scanner and its layers is
       // a zero-target arena, so sweep them reflectively — new arenas cannot be forgotten here.
-      // Object.values allocates; acceptable outside the frame loop. Layer zero's luma aliases
-      // the scanner's, so the double fill is harmless.
+      // Object.values allocates; acceptable outside the frame loop. The two aliases are skipped
+      // by identity: lumaWords views its layer's luma, and layer zero's luma is the scanner's.
       for (const v of Object.values(this)) if (ArrayBuffer.isView(v)) (v as Uint8Array).fill(0);
       for (const layer of this.layers as ScannerLayer[]) {
-        for (const v of Object.values(layer)) if (ArrayBuffer.isView(v)) (v as Uint8Array).fill(0);
+        for (const v of Object.values(layer))
+          if (
+            ArrayBuffer.isView(v) &&
+            v !== layer.lumaWords &&
+            (v !== layer.luma || v !== this.luma)
+          )
+            (v as Uint8Array).fill(0);
         layer.blockHeight = 0;
         layer.blockWidth = 0;
         layer.height = 0;
