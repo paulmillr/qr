@@ -700,9 +700,18 @@ const run = (
 ): number => {
   let n = 0;
   if (dy) {
-    while (bit(layer, x, y) === color && n <= cap) {
+    if (x < 0 || x >= layer.width) return 0;
+    // The column's word offset and mask are fixed; only the row bound moves per step.
+    const bitmap = layer.bitmap;
+    const words = layer.words;
+    const height = layer.height;
+    const mask = 1 << (x & 31);
+    const want = color ? mask : 0;
+    let pos = y * words + (x >>> 5);
+    while (y >= 0 && y < height && (bitmap[pos] & mask) === want && n <= cap) {
       n++;
       y += dy;
+      pos += dy * words;
     }
     return n;
   }
