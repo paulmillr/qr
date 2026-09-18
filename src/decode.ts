@@ -96,7 +96,7 @@ export type QRScannerOpts = DecodeOpts & {
 /** Internal row layout used by DOM VideoFrame ingestion. */
 export type _QRLayout = { offset: number; stride: number };
 export type _QRLayer = {
-  bitmap: Uint32Array;
+  bitmap: Int32Array;
   blockHeight: number;
   blockWidth: number;
   blocks: Uint8Array;
@@ -678,10 +678,10 @@ const run = (
     const shift = x & 31;
     // 1-bits of `stops` mark where the run ends; windowed toward the walk direction so
     // clz32 (left) or the isolated lowest bit (right) yields the matching-bit count.
-    const stops = (color ? ~layer.bitmap[row + (x >>> 5)] : layer.bitmap[row + (x >>> 5)]) >>> 0;
-    const w = dx > 0 ? stops >>> shift : (stops << (31 - shift)) >>> 0;
+    const stops = color ? ~layer.bitmap[row + (x >>> 5)] : layer.bitmap[row + (x >>> 5)];
+    const w = dx > 0 ? stops >> shift : stops << (31 - shift);
     const span = dx > 0 ? Math.min(32 - shift, layer.width - x) : shift + 1;
-    const first = !w ? 32 : dx > 0 ? 31 - Math.clz32((w & -w) >>> 0) : Math.clz32(w);
+    const first = !w ? 32 : dx > 0 ? 31 - Math.clz32(w & -w) : Math.clz32(w);
     const len = Math.min(first, span);
     n += len;
     x += dx * len;
@@ -959,12 +959,12 @@ const scanRows = {
           for (let xx = 0; xx < block; xx++) value |= +(brightness[pos + xx] <= average) << xx;
           const shift = xPos & 31;
           const word = (yPos + yy) * layer.words + (xPos >>> 5);
-          const lowMask = (0xff << shift) >>> 0;
-          layer.bitmap[word] = ((layer.bitmap[word] & ~lowMask) | ((value << shift) >>> 0)) >>> 0;
+          const lowMask = 0xff << shift;
+          layer.bitmap[word] = (layer.bitmap[word] & ~lowMask) | (value << shift);
           if (shift > 24) {
             const highMask = (1 << (shift - 24)) - 1;
             layer.bitmap[word + 1] =
-              ((layer.bitmap[word + 1] & ~highMask) | (value >>> (32 - shift))) >>> 0;
+              (layer.bitmap[word + 1] & ~highMask) | (value >>> (32 - shift));
           }
           pos += layer.width;
         }
@@ -1182,7 +1182,7 @@ export class _QRScanner {
       // Native-resolution descriptor for fine re-sampling from this layer (undefined on layer 0).
       const fine = i ? { luma: this.image, r: i } : undefined;
       layers.push({
-        bitmap: new Uint32Array(Math.ceil(width / 32) * height),
+        bitmap: new Int32Array(Math.ceil(width / 32) * height),
         blockHeight: 0,
         blockWidth: 0,
         blocks,
