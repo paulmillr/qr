@@ -579,6 +579,27 @@ const validateImage = (
     );
   return format;
 };
+// Luma of four-byte pixels straight from their words: (r + 2g + b) >> 2 with the fourth
+// byte ignored. The view is signed because an opaque pixel sets the top bit, which an
+// unsigned read would return as a double; every operation below is bitwise.
+const copyWords = (out: Uint8Array, data: Image['data'], byteStart: number, n: number) => {
+  const words = new Int32Array(data.buffer, byteStart, n);
+  let i = 0;
+  for (; i + 3 < n; i += 4) {
+    const p = words[i];
+    const q = words[i + 1];
+    const r = words[i + 2];
+    const s = words[i + 3];
+    out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2;
+    out[i + 1] = ((q & 255) + ((q >>> 7) & 510) + ((q >>> 16) & 255)) >> 2;
+    out[i + 2] = ((r & 255) + ((r >>> 7) & 510) + ((r >>> 16) & 255)) >> 2;
+    out[i + 3] = ((s & 255) + ((s >>> 7) & 510) + ((s >>> 16) & 255)) >> 2;
+  }
+  for (; i < n; i++) {
+    const p = words[i];
+    out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2;
+  }
+};
 const copyLuma = (
   out: Uint8Array,
   maxSize: Size,
@@ -593,14 +614,23 @@ const copyLuma = (
   // Native luma may already be the decoder arena. Preserve that zero-copy path while sharing
   // every packed/planar conversion with alternate generated scanner backends.
   if (data === out && !offset && stride === width && step === 1) return;
+  if (
+    step === 4 &&
+    LITTLE_ENDIAN &&
+    stride === width * 4 &&
+    ((data.byteOffset + offset) & 3) === 0
+  ) {
+    copyWords(out, data, data.byteOffset + offset, width * height);
+    return;
+  }
+  if (step === 1 && stride === width) {
+    out.set(data.subarray(offset, offset + width * height));
+    return;
+  }
   for (let y = 0; y < height; y++) {
     let src = offset + y * stride;
     let dst = y * width;
-    if (step === 1)
-      for (let x = 0; x < width; x++) {
-        out[dst++] = data[src];
-        src++;
-      }
+    if (step === 1) out.set(data.subarray(src, src + width), dst);
     else if (step === 2)
       for (let x = 0; x < width; x++) {
         out[dst++] = (data[src] | (data[src + 1] << 8)) >>> (bits - 8);
@@ -881,6 +911,31 @@ const scanRows = {
     from: number,
     to: number
   ) {
+    // Whole words when rows keep word alignment: one word from each source row holds four
+    // pixels, summed in two 16-bit lanes to produce two output pixels.
+    if (LITTLE_ENDIAN && (width & 3) === 0 && (dstWidth & 1) === 0 && (src.byteOffset & 3) === 0) {
+      const words = new Int32Array(src.buffer, src.byteOffset, (width * (to << 1)) >> 2);
+      const wordsPerRow = width >> 2;
+      const pairs = dstWidth >> 1;
+      for (let y = from; y < to; y++) {
+        const w0 = (y << 1) * wordsPerRow;
+        const w1 = w0 + wordsPerRow;
+        let dstPos = y * dstWidth;
+        for (let k = 0; k < pairs; k++) {
+          const a = words[w0 + k];
+          const b = words[w1 + k];
+          const sum =
+            (a & 0x00ff00ff) +
+            (b & 0x00ff00ff) +
+            ((a >>> 8) & 0x00ff00ff) +
+            ((b >>> 8) & 0x00ff00ff);
+          dst[dstPos] = ((sum & 0xffff) + 2) >> 2;
+          dst[dstPos + 1] = ((sum >>> 16) + 2) >> 2;
+          dstPos += 2;
+        }
+      }
+      return;
+    }
     for (let y = from; y < to; y++) {
       let srcPos = (y << 1) * width;
       let dstPos = y * dstWidth;
