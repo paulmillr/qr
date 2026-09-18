@@ -599,6 +599,24 @@ const copyWords = (out: Uint8Array, data: Image['data'], byteStart: number, n: n
     out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2;
   }
 };
+// Luma of three-byte pixels from their words: three words carry four pixels, so a pixel's
+// channels come from the word or word pair that holds them; the tail stays byte-wise.
+const copyTriples = (out: Uint8Array, data: Image['data'], byteStart: number, n: number) => {
+  const words = new Int32Array(data.buffer, byteStart, (3 * n) >> 2);
+  let i = 0;
+  let w = 0;
+  for (; i + 3 < n; i += 4, w += 3) {
+    const a = words[w];
+    const b = words[w + 1];
+    const c = words[w + 2];
+    out[i] = ((a & 255) + ((a >>> 7) & 510) + ((a >>> 16) & 255)) >> 2;
+    out[i + 1] = ((a >>> 24) + ((b & 255) << 1) + ((b >>> 8) & 255)) >> 2;
+    out[i + 2] = (((b >>> 16) & 255) + ((b >>> 23) & 510) + (c & 255)) >> 2;
+    out[i + 3] = (((c >>> 8) & 255) + ((c >>> 15) & 510) + (c >>> 24)) >> 2;
+  }
+  for (let src = byteStart - data.byteOffset + i * 3; i < n; i++, src += 3)
+    out[i] = (data[src] + 2 * data[src + 1] + data[src + 2]) >> 2;
+};
 const copyLuma = (
   out: Uint8Array,
   maxSize: Size,
@@ -620,6 +638,15 @@ const copyLuma = (
     ((data.byteOffset + offset) & 3) === 0
   ) {
     copyWords(out, data, data.byteOffset + offset, width * height);
+    return;
+  }
+  if (
+    step === 3 &&
+    LITTLE_ENDIAN &&
+    stride === width * 3 &&
+    ((data.byteOffset + offset) & 3) === 0
+  ) {
+    copyTriples(out, data, data.byteOffset + offset, width * height);
     return;
   }
   if (step === 1 && stride === width) {
