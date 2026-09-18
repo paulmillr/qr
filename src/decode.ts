@@ -244,11 +244,12 @@ type PayloadState = {
   views: Uint8Array[];
 };
 const Payload = {
-  create(capacity: number): PayloadState {
-    const bytes = new Uint8Array(capacity);
-    // One prefix view per length, created on first use: a scanner that
-    // never decodes a byte segment of that length never allocates it.
-    const views = new Array<Uint8Array>(capacity + 1);
+  create(): PayloadState {
+    // Segment bytes sized by the first byte segment's symbol, and one prefix view per
+    // length created on first use: a scanner that never decodes a byte segment of that
+    // length never allocates it.
+    const bytes = new Uint8Array(0);
+    const views: Uint8Array[] = [];
     let state: PayloadState;
     const read = (bits: number) => {
       const start = state.position;
@@ -332,7 +333,11 @@ const Payload = {
           res = '';
         } else {
           const encoding = ECI_ENCODINGS[eci];
-          if (!encoding || length >= state.views.length) return FAIL.data;
+          if (!encoding) return FAIL.data;
+          if (state.bytes.length < dataLen) {
+            state.bytes = new Uint8Array(dataLen);
+            state.views.length = 0;
+          }
           const view =
             state.views[length] ??
             (state.views[length] = new Uint8Array(state.bytes.buffer, 0, length));
@@ -1294,13 +1299,14 @@ export class _QRScanner {
   width: number;
   height: number;
   luma: Uint8Array;
-  private grid = new Uint8Array(177 * 177);
-  private readonly tmp8 = new Uint8Array(177 * 177);
-  private readonly codewords = new Uint8Array(BYTES[40 - 1]);
+  // Version-sized scratch, grown by reserve() to the largest symbol attempted.
+  private grid = new Uint8Array(0);
+  private tmp8 = new Uint8Array(0);
+  private codewords = new Uint8Array(0);
   private readonly tmp32 = new Uint32Array(4 * 16 * 3 + 16);
   private readonly tmp64 = new Float64Array(7 * 7 * 2 + (7 * 7 - 3) * 4);
   private readonly remainder = new Int32Array(8);
-  private readonly payload = Payload.create(BYTES[40 - 1]);
+  private readonly payload = Payload.create();
   private readonly image: Luma;
   private readonly input: Image;
   private inFlight = false;
@@ -1461,6 +1467,15 @@ export class _QRScanner {
     packQuad(this.from, c, c, size - c, c, size - 6.5, size - 6.5, c, size - c);
     packQuad(this.to, t.tl.x, t.tl.y, t.tr.x, t.tr.y, brX, brY, t.bl.x, t.bl.y);
     this.mapQuad(out);
+  }
+
+  // Grow the module grid, function map and codeword scratch to one symbol size: a scanner
+  // that only ever meets small symbols never pays for Version 40.
+  private reserve(size: number): void {
+    if (this.grid.length >= size * size) return;
+    this.grid = new Uint8Array(size * size);
+    this.tmp8 = new Uint8Array(size * size);
+    this.codewords = new Uint8Array(BYTES[(size - 17) / 4 - 1]);
   }
 
   // Fill the reusable alignment-position prefix for one QR version and return its length.
@@ -2535,6 +2550,7 @@ export class _QRScanner {
         )
           continue;
         this.decodedSize = size;
+        this.reserve(size);
         // A located bottom-right alignment pattern upgrades the affine BR estimate to perspective.
         const f = 1 - (3.5 - 0.5) / (size - 7);
         const brEstX = tl.x + (tr.x - tl.x + bl.x - tl.x) * f;
