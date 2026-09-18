@@ -1045,9 +1045,13 @@ export function encodeQR(
   const encoding = opts.encoding !== undefined ? opts.encoding : detectType(text);
   if (!LENGTH_BITS[encoding]) err(`invalid encoding=${encoding}`);
   if (encoding !== 'byte') {
-    const alpha = encoding === 'numeric' ? ALPHANUMERIC.slice(0, 10) : ALPHANUMERIC;
-    for (const ch of text) {
-      if (!alpha.includes(ch)) err(`Unknown letter: "${ch}". Allowed: ${alpha}`);
+    const limit = encoding === 'numeric' ? 10 : ALPHANUMERIC.length;
+    for (let i = 0; i < text.length; i++) {
+      const v = ALNUM_VAL[text.charCodeAt(i)]; // undefined past 127
+      if (!(v >= 0 && v < limit)) {
+        const ch = String.fromCodePoint(text.codePointAt(i)!);
+        err(`Unknown letter: "${ch}". Allowed: ${ALPHANUMERIC.slice(0, limit)}`);
+      }
     }
   }
   if (opts.mask !== undefined && (asNum(opts.mask, 'opts.mask') < 0 || opts.mask > 7))
