@@ -581,6 +581,7 @@ type SymCache = {
   ver: number;
   tpl: Int32Array;
   pos: Uint16Array;
+  pair: Int32Array;
   planes: Int32Array[];
   planesT: Int32Array[];
   work: [Mat, Mat, Mat, Mat];
@@ -674,6 +675,18 @@ function buildSymCache(ver: number): SymCache {
       if (y + dir < 0 || y + dir >= size) break;
     }
   }
+  // The zigzag fills a two-module column, so consecutive positions mostly
+  // sit side by side in one word: such a pair is placed as one 2-bit OR.
+  // Entries are (wordIndex << 6 | shift << 1 | 1), or 0 where the pair
+  // straddles a word or a function pattern.
+  const pair = new Int32Array(n >>> 1);
+  for (let i = 0; i + 1 < n; i += 2) {
+    const a = posBuf[i];
+    const b = posBuf[i + 1];
+    if (a >>> 5 === b >>> 5 && (a & 31) === (b & 31) + 1) {
+      pair[i >>> 1] = ((a >>> 5) << 6) | ((b & 31) << 1) | 1;
+    }
+  }
   const planesT = planes.map((p) => {
     const t = mat(size);
     transposeMat(p, t);
@@ -683,6 +696,7 @@ function buildSymCache(ver: number): SymCache {
     ver,
     tpl: m.v,
     pos: posBuf.slice(0, n),
+    pair,
     planes: planes.map((p) => p.v),
     planesT,
     work: [mat(size), mat(size), mat(size), mat(size)],
@@ -701,14 +715,24 @@ function drawSymbol(
   test = false
 ): Mat {
   if (symCache === undefined || symCache.ver !== ver) symCache = buildSymCache(ver);
-  const { tpl, pos, planes, planesT, work } = symCache;
+  const { tpl, pos, pair, planes, planesT, work } = symCache;
   const [m, t, cand, candT] = work;
   m.v.set(tpl);
   const need = Math.min(8 * data.length, pos.length); // trailing remainder bits stay 0
-  for (let i = 0; i < need; i++) {
-    if (data[i >>> 3] & (0x80 >>> (i & 7))) {
-      const p = pos[i];
-      m.v[p >>> 5] |= 1 << (p & 31);
+  for (let i = 0; i < need; i += 2) {
+    const two = (data[i >>> 3] >>> (6 - (i & 7))) & 3;
+    if (two === 0) continue;
+    const pr = pair[i >>> 1];
+    if (pr & 1) m.v[pr >>> 6] |= two << ((pr >>> 1) & 31);
+    else {
+      if (two & 2) {
+        const p = pos[i];
+        m.v[p >>> 5] |= 1 << (p & 31);
+      }
+      if (two & 1) {
+        const p = pos[i + 1];
+        m.v[p >>> 5] |= 1 << (p & 31);
+      }
     }
   }
   let mask = maskIdx;
