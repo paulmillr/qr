@@ -452,22 +452,34 @@ function finderPenaltyVertical(m: Mat): number {
   let count = 0;
   for (let wi = 0; wi < words; wi++) {
     const valid = wi === words - 1 ? tail : -1;
+    // The eleven-row window rolls down the stripe: ten words load once per
+    // column, then each row step loads one new word and shifts the rest.
+    let i = wi;
+    let r0 = v[i];
+    let r1 = v[(i += words)];
+    let r2 = v[(i += words)];
+    let r3 = v[(i += words)];
+    let r4 = v[(i += words)];
+    let r5 = v[(i += words)];
+    let r6 = v[(i += words)];
+    let r7 = v[(i += words)];
+    let r8 = v[(i += words)];
+    let r9 = v[(i += words)];
     for (let y = 0; y <= size - 11; y++) {
-      let i = y * words + wi;
-      const r0 = v[i];
-      const r1 = v[(i += words)];
-      const r2 = v[(i += words)];
-      const r3 = v[(i += words)];
-      const r4 = v[(i += words)];
-      const r5 = v[(i += words)];
-      const r6 = v[(i += words)];
-      const r7 = v[(i += words)];
-      const r8 = v[(i += words)];
-      const r9 = v[(i += words)];
-      const r10 = v[i + words];
+      const r10 = v[(i += words)];
       const m0 = valid & r0 & ~r1 & r2 & r3 & r4 & ~r5 & r6 & ~(r7 | r8 | r9 | r10);
       const m1 = valid & ~(r0 | r1 | r2 | r3) & r4 & ~r5 & r6 & r7 & r8 & ~r9 & r10;
       count += popcnt(m0) + popcnt(m1);
+      r0 = r1;
+      r1 = r2;
+      r2 = r3;
+      r3 = r4;
+      r4 = r5;
+      r5 = r6;
+      r6 = r7;
+      r7 = r8;
+      r8 = r9;
+      r9 = r10;
     }
   }
   return count;
