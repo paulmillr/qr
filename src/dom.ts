@@ -230,6 +230,7 @@ type ScannedFrame = {
 };
 
 type CanvasReader = {
+  busy(): boolean;
   clean(): void;
   crop: boolean;
   luma: Uint8Array;
@@ -406,6 +407,7 @@ export class QRCanvas {
       };
     this.scanner = new _scanner(decoder);
     this.reader = {
+      busy: () => !!this.pending,
       clean: () => {
         this.generation++;
         this.task?.abort();
@@ -1037,7 +1039,8 @@ export class QRCamera {
     // Before the first decoded frame the constructor throws, which the fallback
     // below would read as missing support; the frame is simply not here yet.
     if (this.player.readyState < 2) return;
-    if (this.reading) return;
+    // An async decode still reads the arena; a new frame must not land in it.
+    if (this.reading || reader.busy()) return;
     this.reading = true;
     const source = this.source;
     let frame: VideoFrame;
