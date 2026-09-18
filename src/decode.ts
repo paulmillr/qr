@@ -2264,11 +2264,14 @@ export class _QRScanner {
                 corrected = true;
                 break correct;
               }
+              // The register holds x^words * C(x) mod g(x), which agrees with the block at every
+              // generator root up to the factor alpha^(i * words), so the syndromes come from its
+              // `words` coefficients instead of the whole block.
+              for (let k = 0; k < words; k++) fun[next + k] = (rem[k >> 2] >> ((k & 3) * 8)) & 0xff;
               for (let i = 0; i < words; i++) {
                 let value = 0;
-                for (let j = 0; j < length; j++)
-                  value = mul(value, EXP[i]) ^ blockBytes[offset + j];
-                fun[syndromes + i] = value;
+                for (let k = 0; k < words; k++) value = mul(value, EXP[i]) ^ fun[next + k];
+                fun[syndromes + i] = mul(value, EXP[255 - ((i * words) % 255)]);
               }
               fun.fill(0, sigma, sigma + words + 1);
               fun.fill(0, previous, previous + words + 1);
