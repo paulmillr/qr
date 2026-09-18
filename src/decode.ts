@@ -254,14 +254,13 @@ const Payload = {
     const read = (bits: number) => {
       const start = state.position;
       if (start + bits > state.dataLen * 8) return -1;
-      let value = 0;
-      let pos = start;
-      for (let i = 0; i < bits; i++) {
-        value = (value << 1) | ((state.data[pos >> 3] >> (7 - (pos & 7))) & 1);
-        pos++;
-      }
-      state.position = pos;
-      return value;
+      const data = state.data;
+      const byte = start >> 3;
+      // No field exceeds 16 bits, so three bytes cover it at any bit offset; bytes past the
+      // end read as zero and are masked away with the rest of the window.
+      const window = (data[byte] << 16) | (data[byte + 1] << 8) | data[byte + 2];
+      state.position = start + bits;
+      return (window >> (24 - (start & 7) - bits)) & ((1 << bits) - 1);
     };
     state = { position: 0, data: new Uint8Array(0), dataLen: 0, bytes, read, views };
     return state;
