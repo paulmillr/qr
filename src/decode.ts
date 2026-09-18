@@ -2338,21 +2338,49 @@ export class _QRScanner {
     s: Plane,
     map: Float64Array,
     size: number,
-    left = 0,
-    right = size,
-    top = 0,
-    bottom = size
+    left: number,
+    right: number,
+    top: number,
+    bottom: number
   ): void {
-    for (let y = top; y < bottom; y++)
+    const { W, H, d, cut, sh, bw } = s;
+    const grid = this.grid;
+    const inverted = this.invertedProjection;
+    const m0 = map[0];
+    const m1 = map[1];
+    const m2 = map[2];
+    const m3 = map[3];
+    const m4 = map[4];
+    const m5 = map[5];
+    const m6 = map[6];
+    const m7 = map[7];
+    const m8 = map[8];
+    // read() unrolled: each row's homography terms are products of one module coordinate,
+    // computed once per row and summed in read()'s order.
+    for (let y = top; y < bottom; y++) {
+      const my = y + 0.5;
+      const rx = m1 * my;
+      const ry = m4 * my;
+      const rd = m7 * my;
       for (let x = left; x < right; x++) {
-        this.grid[y * size + x] = this.read(s, map, x + 0.5, y + 0.5);
+        const mx = x + 0.5;
+        const den = m6 * mx + rd + m8;
+        const px = Math.floor((m0 * mx + rx + m2) / den);
+        const py = Math.floor((m3 * mx + ry + m5) / den);
+        let value = 0;
+        if (px >= 0 && py >= 0 && px < W && py < H) {
+          const dark = d[py * W + px] <= cut[(py >> sh) * bw + (px >> sh)];
+          value = dark !== inverted ? 1 : 0;
+        }
+        grid[y * size + x] = value;
       }
+    }
   }
 
   // Timing prefilter + global grid projection against one plane.
   private projectMap(s: Plane, map: Float64Array, size: number, ctx: Ctx): Attempt {
     const ok = this.timing(s, map, size);
-    if (ok) this.projectQuad(s, map, size);
+    if (ok) this.projectQuad(s, map, size, 0, size, 0, size);
     return ok ? this.decodeGrid(size, ctx) : FAIL.timing;
   }
 
