@@ -968,6 +968,8 @@ export class QRCamera {
     player.setAttribute('autoplay', '');
     player.setAttribute('muted', '');
     player.setAttribute('playsinline', '');
+    // The muted attribute is only the default; the property is the state autoplay checks.
+    player.muted = true;
     player.srcObject = stream;
   }
   /**
