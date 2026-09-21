@@ -21,6 +21,7 @@ import {
   _formatBits as formatBits,
   _maskBits as maskBits,
   _popcnt as popcnt,
+  _rsCached as rsCached,
   _versionBits as versionBits,
 } from './index.ts';
 
@@ -68,6 +69,12 @@ export type DecodeOpts = {
   effort?: number;
   /** Milliseconds available to optional retries; defaults to one 60-FPS frame budget. */
   timeLimit?: number;
+  /**
+   * Skip the finder search on the native layer when its shorter side exceeds this many
+   * pixels: symbols are then found on the half-resolution layer and their modules still
+   * sampled from native luma. Defaults to Infinity (every layer is searched).
+   */
+  nativeLimit?: number;
   /** Custom byte-to-text decoder used for byte segments; receives the active ECI designator. */
   textDecoder?: (bytes: Uint8Array, eci?: number) => string;
   /**
@@ -96,7 +103,7 @@ export type QRScannerOpts = DecodeOpts & {
 /** Internal row layout used by DOM VideoFrame ingestion. */
 export type _QRLayout = { offset: number; stride: number };
 export type _QRLayer = {
-  bitmap: Uint32Array;
+  bitmap: Int32Array;
   blockHeight: number;
   blockWidth: number;
   blocks: Uint8Array;
@@ -109,6 +116,7 @@ export type _QRLayer = {
   width: number;
   words: number;
 };
+const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 const cap = (value: number, min?: number, max?: number) => {
   let result = value;
   if (max !== undefined) result = Math.min(result, max);
@@ -120,7 +128,6 @@ const cap = (value: number, min?: number, max?: number) => {
 const { exp: EXP, log: LOG } = GF256;
 const mul = (a: number, b: number) => (a && b ? EXP[LOG[a] + LOG[b]] : 0);
 const inv = (a: number) => EXP[255 - LOG[a]];
-
 type Luma = { width: number; height: number; data: Uint8Array };
 export type _QRPlane = readonly [xShift: 0 | 1, yShift: 0 | 1, bytes: 1 | 2 | 3 | 4];
 export type _QRInputFormat = { step: 1 | 2 | 3 | 4; bits: 8 | 10 | 12 };
@@ -243,22 +250,23 @@ type PayloadState = {
   views: Uint8Array[];
 };
 const Payload = {
-  create(capacity: number): PayloadState {
-    const bytes = new Uint8Array(capacity);
-    const views = new Array<Uint8Array>(capacity + 1);
-    for (let i = 0; i < views.length; i++) views[i] = new Uint8Array(bytes.buffer, 0, i);
+  create(): PayloadState {
+    // Segment bytes sized by the first byte segment's symbol, and one prefix view per
+    // length created on first use: a scanner that never decodes a byte segment of that
+    // length never allocates it.
+    const bytes = new Uint8Array(0);
+    const views: Uint8Array[] = [];
     let state: PayloadState;
     const read = (bits: number) => {
       const start = state.position;
       if (start + bits > state.dataLen * 8) return -1;
-      let value = 0;
-      let pos = start;
-      for (let i = 0; i < bits; i++) {
-        value = (value << 1) | ((state.data[pos >> 3] >> (7 - (pos & 7))) & 1);
-        pos++;
-      }
-      state.position = pos;
-      return value;
+      const data = state.data;
+      const byte = start >> 3;
+      // No field exceeds 16 bits, so three bytes cover it at any bit offset; bytes past the
+      // end read as zero and are masked away with the rest of the window.
+      const window = (data[byte] << 16) | (data[byte + 1] << 8) | data[byte + 2];
+      state.position = start + bits;
+      return (window >> (24 - (start & 7) - bits)) & ((1 << bits) - 1);
     };
     state = { position: 0, data: new Uint8Array(0), dataLen: 0, bytes, read, views };
     return state;
@@ -331,10 +339,17 @@ const Payload = {
           res = '';
         } else {
           const encoding = ECI_ENCODINGS[eci];
-          if (!encoding || length >= state.views.length) return FAIL.data;
+          if (!encoding) return FAIL.data;
+          if (state.bytes.length < dataLen) {
+            state.bytes = new Uint8Array(dataLen);
+            state.views.length = 0;
+          }
+          const view =
+            state.views[length] ??
+            (state.views[length] = new Uint8Array(state.bytes.buffer, 0, length));
           const decoder = ECI_DECODERS[eci] || new TextDecoder(encoding);
           for (let i = 0; i < length; i++) state.bytes[i] = read(8);
-          res += decoder.decode(state.views[length]);
+          res += decoder.decode(view);
         }
       } else return FAIL.data;
     }
@@ -462,10 +477,14 @@ type ScannerTriple = Triple & {
 // A fractional initial value establishes unboxed-double fields before per-frame writes.
 const makePattern = (): Pattern => ({ x: 0.1, y: 0.1, ms: 0.1 });
 type ScannerLayer = _QRLayer & {
+  // Four luma pixels per word for the binarizer; undefined on big-endian hosts.
+  readonly lumaWords: Int32Array | undefined;
   readonly plane: Plane;
   readonly context: Ctx;
+  // Finder search runs on this layer; false on a native layer past nativeLimit.
+  search: boolean;
   found: boolean;
-  readonly inverted: Uint8Array;
+  inverted: Uint8Array;
   readonly sets: Float64Array;
   setCount: number;
   setCursor: number;
@@ -516,6 +535,16 @@ const validateOpts = (opts: DecodeOpts): void => {
     (typeof opts.timeLimit !== 'number' || !Number.isFinite(opts.timeLimit) || opts.timeLimit < 0)
   )
     throw new TypeError(`invalid opts.timeLimit=${opts.timeLimit} (${typeof opts.timeLimit})`);
+  if (
+    opts.nativeLimit !== undefined &&
+    opts.nativeLimit !== Infinity &&
+    (typeof opts.nativeLimit !== 'number' ||
+      !Number.isFinite(opts.nativeLimit) ||
+      opts.nativeLimit < 0)
+  )
+    throw new TypeError(
+      `invalid opts.nativeLimit=${opts.nativeLimit} (${typeof opts.nativeLimit})`
+    );
   for (const name of ['textDecoder', 'pointsOnDetect', 'imageOnResult', 'imageOnBitmap'] as const)
     if (opts[name] !== undefined && typeof opts[name] !== 'function')
       throw new TypeError(`invalid opts.${name}=${opts[name]} (${typeof opts[name]})`);
@@ -572,6 +601,45 @@ const validateImage = (
     );
   return format;
 };
+// Luma of four-byte pixels straight from their words: (r + 2g + b) >> 2 with the fourth
+// byte ignored. The view is signed because an opaque pixel sets the top bit, which an
+// unsigned read would return as a double; every operation below is bitwise.
+const copyWords = (out: Uint8Array, data: Image['data'], byteStart: number, n: number) => {
+  const words = new Int32Array(data.buffer, byteStart, n);
+  let i = 0;
+  for (; i + 3 < n; i += 4) {
+    const p = words[i];
+    const q = words[i + 1];
+    const r = words[i + 2];
+    const s = words[i + 3];
+    out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2;
+    out[i + 1] = ((q & 255) + ((q >>> 7) & 510) + ((q >>> 16) & 255)) >> 2;
+    out[i + 2] = ((r & 255) + ((r >>> 7) & 510) + ((r >>> 16) & 255)) >> 2;
+    out[i + 3] = ((s & 255) + ((s >>> 7) & 510) + ((s >>> 16) & 255)) >> 2;
+  }
+  for (; i < n; i++) {
+    const p = words[i];
+    out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2;
+  }
+};
+// Luma of three-byte pixels from their words: three words carry four pixels, so a pixel's
+// channels come from the word or word pair that holds them; the tail stays byte-wise.
+const copyTriples = (out: Uint8Array, data: Image['data'], byteStart: number, n: number) => {
+  const words = new Int32Array(data.buffer, byteStart, (3 * n) >> 2);
+  let i = 0;
+  let w = 0;
+  for (; i + 3 < n; i += 4, w += 3) {
+    const a = words[w];
+    const b = words[w + 1];
+    const c = words[w + 2];
+    out[i] = ((a & 255) + ((a >>> 7) & 510) + ((a >>> 16) & 255)) >> 2;
+    out[i + 1] = ((a >>> 24) + ((b & 255) << 1) + ((b >>> 8) & 255)) >> 2;
+    out[i + 2] = (((b >>> 16) & 255) + ((b >>> 23) & 510) + (c & 255)) >> 2;
+    out[i + 3] = (((c >>> 8) & 255) + ((c >>> 15) & 510) + (c >>> 24)) >> 2;
+  }
+  for (let src = byteStart - data.byteOffset + i * 3; i < n; i++, src += 3)
+    out[i] = (data[src] + 2 * data[src + 1] + data[src + 2]) >> 2;
+};
 const copyLuma = (
   out: Uint8Array,
   maxSize: Size,
@@ -586,14 +654,32 @@ const copyLuma = (
   // Native luma may already be the decoder arena. Preserve that zero-copy path while sharing
   // every packed/planar conversion with alternate generated scanner backends.
   if (data === out && !offset && stride === width && step === 1) return;
+  if (
+    step === 4 &&
+    LITTLE_ENDIAN &&
+    stride === width * 4 &&
+    ((data.byteOffset + offset) & 3) === 0
+  ) {
+    copyWords(out, data, data.byteOffset + offset, width * height);
+    return;
+  }
+  if (
+    step === 3 &&
+    LITTLE_ENDIAN &&
+    stride === width * 3 &&
+    ((data.byteOffset + offset) & 3) === 0
+  ) {
+    copyTriples(out, data, data.byteOffset + offset, width * height);
+    return;
+  }
+  if (step === 1 && stride === width) {
+    out.set(data.subarray(offset, offset + width * height));
+    return;
+  }
   for (let y = 0; y < height; y++) {
     let src = offset + y * stride;
     let dst = y * width;
-    if (step === 1)
-      for (let x = 0; x < width; x++) {
-        out[dst++] = data[src];
-        src++;
-      }
+    if (step === 1) out.set(data.subarray(src, src + width), dst);
     else if (step === 2)
       for (let x = 0; x < width; x++) {
         out[dst++] = (data[src] | (data[src + 1] << 8)) >>> (bits - 8);
@@ -637,15 +723,22 @@ const bit = (layer: ScannerLayer, x: number, y: number) => {
 const ratio = (a: number, b: number, c: number, d: number, e: number) => {
   const total = a + b + c + d + e;
   if (total < 7) return 0;
-  const ms = total / 7;
-  // Half-module tolerance accommodates sampling noise around the three-module center.
-  const tol = ms * 0.5;
-  return Math.abs(ms - a) < tol &&
-    Math.abs(ms - b) < tol &&
-    Math.abs(3 * ms - c) < 3 * tol &&
-    Math.abs(ms - d) < tol &&
-    Math.abs(ms - e) < tol
-    ? ms
+  // Half-module tolerance accommodates sampling noise around the three-module center:
+  // each side run within (0.5, 1.5) modules and the center within (1.5, 4.5), tested on
+  // integer runs as 14 * run against multiples of the seven-module total.
+  const lo = total;
+  const hi = 3 * total;
+  return lo < 14 * a &&
+    14 * a < hi &&
+    lo < 14 * b &&
+    14 * b < hi &&
+    hi < 14 * c &&
+    14 * c < 9 * total &&
+    lo < 14 * d &&
+    14 * d < hi &&
+    lo < 14 * e &&
+    14 * e < hi
+    ? total / 7
     : 0;
 };
 // Consecutive `color` bits from (x,y) inclusive stepping (dx,dy); stops on mismatch, border,
@@ -662,9 +755,18 @@ const run = (
 ): number => {
   let n = 0;
   if (dy) {
-    while (bit(layer, x, y) === color && n <= cap) {
+    if (x < 0 || x >= layer.width) return 0;
+    // The column's word offset and mask are fixed; only the row bound moves per step.
+    const bitmap = layer.bitmap;
+    const words = layer.words;
+    const height = layer.height;
+    const mask = 1 << (x & 31);
+    const want = color ? mask : 0;
+    let pos = y * words + (x >>> 5);
+    while (y >= 0 && y < height && (bitmap[pos] & mask) === want && n <= cap) {
       n++;
       y += dy;
+      pos += dy * words;
     }
     return n;
   }
@@ -674,10 +776,10 @@ const run = (
     const shift = x & 31;
     // 1-bits of `stops` mark where the run ends; windowed toward the walk direction so
     // clz32 (left) or the isolated lowest bit (right) yields the matching-bit count.
-    const stops = (color ? ~layer.bitmap[row + (x >>> 5)] : layer.bitmap[row + (x >>> 5)]) >>> 0;
-    const w = dx > 0 ? stops >>> shift : (stops << (31 - shift)) >>> 0;
+    const stops = color ? ~layer.bitmap[row + (x >>> 5)] : layer.bitmap[row + (x >>> 5)];
+    const w = dx > 0 ? stops >> shift : stops << (31 - shift);
     const span = dx > 0 ? Math.min(32 - shift, layer.width - x) : shift + 1;
-    const first = !w ? 32 : dx > 0 ? 31 - Math.clz32((w & -w) >>> 0) : Math.clz32(w);
+    const first = !w ? 32 : dx > 0 ? 31 - Math.clz32(w & -w) : Math.clz32(w);
     const len = Math.min(first, span);
     n += len;
     x += dx * len;
@@ -699,17 +801,22 @@ const cross = (
 ): number => {
   const center = +!inverted;
   const side = +inverted;
-  let r2 = run(layer, cx, cy, -dx, -dy, center, Infinity);
-  let back = r2;
+  let back = run(layer, cx, cy, -dx, -dy, center, Infinity);
+  const forward = run(layer, cx + dx, cy + dy, dx, dy, center, Infinity);
+  const r2 = back + forward;
+  // ratio() needs a center run over 1.5 modules and every other run under that, so a center
+  // shorter than two bits or no longer than a neighbor fails before the remaining runs.
+  if (r2 < 2) return -1;
   const r1 = run(layer, cx - dx * back, cy - dy * back, -dx, -dy, side, maxMs);
+  if (r1 >= r2) return -1;
   back += r1;
   const r0 = run(layer, cx - dx * back, cy - dy * back, -dx, -dy, center, maxMs);
+  if (r0 >= r2) return -1;
   back += r0;
   const start = (dx ? cx : cy) - back;
-  const forward = run(layer, cx + dx, cy + dy, dx, dy, center, Infinity);
-  r2 += forward;
   let ahead = 1 + forward;
   const r3 = run(layer, cx + dx * ahead, cy + dy * ahead, dx, dy, side, maxMs);
+  if (r3 >= r2) return -1;
   ahead += r3;
   const r4 = run(layer, cx + dx * ahead, cy + dy * ahead, dx, dy, center, maxMs);
   if (!ratio(r0, r1, r2, r3, r4)) return -1;
@@ -826,6 +933,21 @@ const edgePitch = (layer: ScannerLayer, first: Pattern, second: Pattern, inverte
   const secondPitch = pitch(second);
   return firstPitch && secondPitch ? (firstPitch + secondPitch) / 2 : 0;
 };
+// Double a layer's finder records, up to one per 7x7 cell of the staged frame.
+const growFinders = (layer: ScannerLayer): Float64Array => {
+  const centers = Math.ceil(layer.width / 7) * Math.ceil(layer.height / 7);
+  const count = layer.inverted.length;
+  if (count >= centers)
+    throw new Error(`finder storage exhausted at ${layer.width}x${layer.height}`);
+  const records = Math.min(centers, count * 2);
+  const patterns = new Float64Array(records * 4);
+  patterns.set(layer.patterns);
+  const inverted = new Uint8Array(records);
+  inverted.set(layer.inverted);
+  layer.patterns = patterns;
+  layer.inverted = inverted;
+  return patterns;
+};
 // Confidence (slot 3) stays behind: every consumer reads it straight from the record.
 const copyPattern = (layer: ScannerLayer, index: number, out: Pattern) => {
   const pos = index * 4;
@@ -874,6 +996,31 @@ const scanRows = {
     from: number,
     to: number
   ) {
+    // Whole words when rows keep word alignment: one word from each source row holds four
+    // pixels, summed in two 16-bit lanes to produce two output pixels.
+    if (LITTLE_ENDIAN && (width & 3) === 0 && (dstWidth & 1) === 0 && (src.byteOffset & 3) === 0) {
+      const words = new Int32Array(src.buffer, src.byteOffset, (width * (to << 1)) >> 2);
+      const wordsPerRow = width >> 2;
+      const pairs = dstWidth >> 1;
+      for (let y = from; y < to; y++) {
+        const w0 = (y << 1) * wordsPerRow;
+        const w1 = w0 + wordsPerRow;
+        let dstPos = y * dstWidth;
+        for (let k = 0; k < pairs; k++) {
+          const a = words[w0 + k];
+          const b = words[w1 + k];
+          const sum =
+            (a & 0x00ff00ff) +
+            (b & 0x00ff00ff) +
+            ((a >>> 8) & 0x00ff00ff) +
+            ((b >>> 8) & 0x00ff00ff);
+          dst[dstPos] = ((sum & 0xffff) + 2) >> 2;
+          dst[dstPos + 1] = ((sum >>> 16) + 2) >> 2;
+          dstPos += 2;
+        }
+      }
+      return;
+    }
     for (let y = from; y < to; y++) {
       let srcPos = (y << 1) * width;
       let dstPos = y * dstWidth;
@@ -900,13 +1047,33 @@ const scanRows = {
         let min = 0xff;
         let max = 0;
         let pos = yPos * layer.width + xPos;
+        // Eight pixels per block row, unrolled by hand; `block` is fixed at 8.
         for (let yy = 0; yy < block; yy++) {
-          for (let xx = 0; xx < block; xx++) {
-            const pixel = brightness[pos + xx];
-            sum += pixel;
-            min = Math.min(min, pixel);
-            max = Math.max(max, pixel);
-          }
+          const p0 = brightness[pos];
+          const p1 = brightness[pos + 1];
+          const p2 = brightness[pos + 2];
+          const p3 = brightness[pos + 3];
+          const p4 = brightness[pos + 4];
+          const p5 = brightness[pos + 5];
+          const p6 = brightness[pos + 6];
+          const p7 = brightness[pos + 7];
+          sum += p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7;
+          if (p0 < min) min = p0;
+          if (p1 < min) min = p1;
+          if (p2 < min) min = p2;
+          if (p3 < min) min = p3;
+          if (p4 < min) min = p4;
+          if (p5 < min) min = p5;
+          if (p6 < min) min = p6;
+          if (p7 < min) min = p7;
+          if (p0 > max) max = p0;
+          if (p1 > max) max = p1;
+          if (p2 > max) max = p2;
+          if (p3 > max) max = p3;
+          if (p4 > max) max = p4;
+          if (p5 > max) max = p5;
+          if (p6 > max) max = p6;
+          if (p7 > max) max = p7;
           pos += layer.width;
         }
         let average = Math.floor(sum / block ** 2);
@@ -935,34 +1102,79 @@ const scanRows = {
     const maxY = layer.height - block;
     const maxX = layer.width - block;
     const blocks = layer.blocks;
+    // Four pixels per word when rows keep word alignment.
+    const lumaWords = (layer.width & 3) === 0 ? layer.lumaWords : undefined;
     for (let y = from; y < to; y++) {
       const yPos = cap(y * block, 0, maxY);
-      // The historical 5x5 smoother improves perspective coverage.
+      // The historical 5x5 smoother improves perspective coverage. Its window is clamped
+      // two blocks inside either edge, so it slides one column at a time between them:
+      // each step drops the column sum leaving the window and adds the one entering it.
       const top = cap(y, 2, bHeight - 3);
+      const row = bWidth * (top - 2);
+      let c0 = blocks[row] + blocks[row + bWidth] + blocks[row + 2 * bWidth];
+      c0 += blocks[row + 3 * bWidth] + blocks[row + 4 * bWidth];
+      let c1 = blocks[row + 1] + blocks[row + 1 + bWidth] + blocks[row + 1 + 2 * bWidth];
+      c1 += blocks[row + 1 + 3 * bWidth] + blocks[row + 1 + 4 * bWidth];
+      let c2 = blocks[row + 2] + blocks[row + 2 + bWidth] + blocks[row + 2 + 2 * bWidth];
+      c2 += blocks[row + 2 + 3 * bWidth] + blocks[row + 2 + 4 * bWidth];
+      let c3 = blocks[row + 3] + blocks[row + 3 + bWidth] + blocks[row + 3 + 2 * bWidth];
+      c3 += blocks[row + 3 + 3 * bWidth] + blocks[row + 3 + 4 * bWidth];
+      let c4 = blocks[row + 4] + blocks[row + 4 + bWidth] + blocks[row + 4 + 2 * bWidth];
+      c4 += blocks[row + 4 + 3 * bWidth] + blocks[row + 4 + 4 * bWidth];
+      let sum = c0 + c1 + c2 + c3 + c4;
       for (let x = 0; x < bWidth; x++) {
         const xPos = cap(x * block, 0, maxX);
-        const left = cap(x, 2, bWidth - 3);
-        let sum = 0;
-        for (let yy = -2; yy <= 2; yy++) {
-          const row = bWidth * (top + yy) + left;
-          for (let xx = -2; xx <= 2; xx++) sum += blocks[row + xx];
+        if (x > 2 && x <= bWidth - 3) {
+          const col = row + x + 2;
+          c0 = c1;
+          c1 = c2;
+          c2 = c3;
+          c3 = c4;
+          c4 = blocks[col] + blocks[col + bWidth] + blocks[col + 2 * bWidth];
+          c4 += blocks[col + 3 * bWidth] + blocks[col + 4 * bWidth];
+          sum = c0 + c1 + c2 + c3 + c4;
         }
         const average = sum / 25;
-        layer.cuts[y * bWidth + x] = Math.floor(average);
+        const cut = Math.floor(average);
+        layer.cuts[y * bWidth + x] = cut;
         let pos = yPos * layer.width + xPos;
+        const shift = xPos & 31;
+        let word = yPos * layer.words + (xPos >>> 5);
+        const lowMask = 0xff << shift;
+        // A word-aligned row compares four pixels per word in two 16-bit lanes:
+        // (cut + 256) - v sets lane bit 8 exactly when v <= cut, and no lane borrows
+        // because every difference stays positive.
+        const swar = lumaWords !== undefined && (pos & 3) === 0 && cut >= 0;
+        const lanes = ((cut + 256) << 16) | (cut + 256);
         for (let yy = 0; yy < block; yy++) {
           let value = 0;
-          for (let xx = 0; xx < block; xx++) value |= +(brightness[pos + xx] <= average) << xx;
-          const shift = xPos & 31;
-          const word = (yPos + yy) * layer.words + (xPos >>> 5);
-          const lowMask = (0xff << shift) >>> 0;
-          layer.bitmap[word] = ((layer.bitmap[word] & ~lowMask) | ((value << shift) >>> 0)) >>> 0;
+          if (swar) {
+            const w0 = lumaWords[pos >> 2];
+            const w1 = lumaWords[(pos >> 2) + 1];
+            const a = lanes - (w0 & 0x00ff00ff);
+            const b = lanes - ((w0 >>> 8) & 0x00ff00ff);
+            const c = lanes - (w1 & 0x00ff00ff);
+            const d = lanes - ((w1 >>> 8) & 0x00ff00ff);
+            value =
+              ((a >>> 8) & 1) |
+              ((b >>> 7) & 2) |
+              ((a >>> 22) & 4) |
+              ((b >>> 21) & 8) |
+              ((c >>> 4) & 16) |
+              ((d >>> 3) & 32) |
+              ((c >>> 18) & 64) |
+              ((d >>> 17) & 128);
+          } else {
+            for (let xx = 0; xx < block; xx++) value |= +(brightness[pos + xx] <= average) << xx;
+          }
+          layer.bitmap[word] = (layer.bitmap[word] & ~lowMask) | (value << shift);
           if (shift > 24) {
             const highMask = (1 << (shift - 24)) - 1;
             layer.bitmap[word + 1] =
-              ((layer.bitmap[word + 1] & ~highMask) | (value >>> (32 - shift))) >>> 0;
+              (layer.bitmap[word + 1] & ~highMask) | (value >>> (32 - shift));
           }
           pos += layer.width;
+          word += layer.words;
         }
       }
     }
@@ -971,7 +1183,11 @@ const scanRows = {
   find(layer: ScannerLayer, from: number, to: number) {
     // Rolling window over each row's run-length encoding (no per-row arrays):
     // check every 5-run window that starts, centers, and ends on a black run.
-    // run() always advances (previous matches the bit at x by construction).
+    // Each run is measured straight off the packed row: the word's opposite-color bits
+    // are isolated with clz32 and whole words are consumed until a stop or the row's end.
+    const width = layer.width;
+    const words = layer.words;
+    const bitmap = layer.bitmap;
     for (let y = from; y < to; y += 2) {
       let r0 = 0;
       let r1 = 0;
@@ -979,10 +1195,25 @@ const scanRows = {
       let r3 = 0;
       let r4 = 0;
       let runs = 0;
-      let previous = !!bit(layer, 0, y | 0);
-      for (let x = 0; x < layer.width;) {
-        const length = run(layer, x, y, 1, 0, +previous, Infinity);
-        x += length;
+      let at = y * words;
+      let word = bitmap[at];
+      let shift = 0;
+      let previous = (word & 1) === 1;
+      for (let x = 0; x < width;) {
+        let length = 0;
+        for (;;) {
+          const stops = previous ? ~word : word;
+          const w = stops >> shift;
+          const span = Math.min(32 - shift, width - x);
+          const first = !w ? 32 : 31 - Math.clz32(w & -w);
+          const len = Math.min(first, span);
+          length += len;
+          x += len;
+          shift += len;
+          if (first < span || x >= width) break;
+          word = bitmap[++at];
+          shift = 0;
+        }
         r0 = r1;
         r1 = r2;
         r2 = r3;
@@ -992,7 +1223,9 @@ const scanRows = {
         const black = previous;
         previous = !previous;
         candidate: {
-          if ((runs | 0) < 5) break candidate;
+          // A center run exceeds 1.5 modules and its neighbors fall short of 1.5, so a
+          // center no longer than a neighbor never passes ratio().
+          if ((runs | 0) < 5 || r2 <= r1 || r2 <= r3) break candidate;
           const inverted = !black;
           const ms = ratio(r0, r1, r2, r3, r4);
           if (!ms) break candidate;
@@ -1003,7 +1236,7 @@ const scanRows = {
           if (cy < 0) break candidate;
           const refinedX = cross(layer, cx, Math.round(cy), 1, 0, limit, inverted);
           if (refinedX < 0) break candidate;
-          const patterns = layer.patterns;
+          let patterns = layer.patterns;
           const polarity = +inverted;
           for (let i = 0; i < layer.patternCount; i++) {
             const pos = i * 4;
@@ -1023,8 +1256,7 @@ const scanRows = {
           }
           const index = layer.patternCount++;
           const pos = index * 4;
-          if (pos + 3 >= patterns.length)
-            throw new Error(`finder storage exhausted at ${layer.width}x${layer.height}`);
+          if (pos + 3 >= patterns.length) patterns = growFinders(layer);
           patterns[pos] = refinedX;
           patterns[pos + 1] = cy;
           patterns[pos + 2] = ms;
@@ -1085,12 +1317,14 @@ export class _QRScanner {
   width: number;
   height: number;
   luma: Uint8Array;
-  private grid = new Uint8Array(177 * 177);
-  private readonly tmp8 = new Uint8Array(177 * 177);
-  private readonly codewords = new Uint8Array(BYTES[40 - 1]);
+  // Version-sized scratch, grown by reserve() to the largest symbol attempted.
+  private grid = new Uint8Array(0);
+  private tmp8 = new Uint8Array(0);
+  private codewords = new Uint8Array(0);
   private readonly tmp32 = new Uint32Array(4 * 16 * 3 + 16);
   private readonly tmp64 = new Float64Array(7 * 7 * 2 + (7 * 7 - 3) * 4);
-  private readonly payload = Payload.create(BYTES[40 - 1]);
+  private readonly remainder = new Int32Array(8);
+  private readonly payload = Payload.create();
   private readonly image: Luma;
   private readonly input: Image;
   private inFlight = false;
@@ -1110,6 +1344,8 @@ export class _QRScanner {
   private blocked = 0;
   private readonly effort: number;
   private readonly timeLimit: number;
+  /** Native-layer search gate (see DecodeOpts.nativeLimit); settable between frames. */
+  nativeLimit: number;
   private retryStart = 0;
   private retries = 0;
   private points?: FinderPoints;
@@ -1153,6 +1389,7 @@ export class _QRScanner {
       );
     this.effort = init.effort === undefined ? 1 : init.effort;
     this.timeLimit = init.timeLimit === undefined ? 1000 / 60 : init.timeLimit;
+    this.nativeLimit = init.nativeLimit === undefined ? Infinity : init.nativeLimit;
     this.opts = Object.freeze({
       ...init,
       effort: this.effort,
@@ -1171,20 +1408,24 @@ export class _QRScanner {
       if (i && Math.min(width, height) < 64) break;
       const blockWidth = Math.ceil(width / 8);
       const blockHeight = Math.ceil(height / 8);
-      const centers = Math.ceil(width / 7) * Math.ceil(height / 7);
+      // Finder records start small and grow on demand, up to one per 7x7 cell.
+      const centers = Math.min(64, Math.ceil(width / 7) * Math.ceil(height / 7));
       const luma = i ? new Uint8Array(width * height) : this.luma;
       const blocks = new Uint8Array(blockWidth * blockHeight);
       const cuts = new Int16Array(blockWidth * blockHeight);
       // Native-resolution descriptor for fine re-sampling from this layer (undefined on layer 0).
       const fine = i ? { luma: this.image, r: i } : undefined;
       layers.push({
-        bitmap: new Uint32Array(Math.ceil(width / 32) * height),
+        bitmap: new Int32Array(Math.ceil(width / 32) * height),
         blockHeight: 0,
         blockWidth: 0,
         blocks,
         cuts,
         height: 0,
         luma,
+        lumaWords: LITTLE_ENDIAN
+          ? new Int32Array(luma.buffer, luma.byteOffset, luma.length >> 2)
+          : undefined,
         patternCount: 0,
         patterns: new Float64Array(centers * 4),
         used: false,
@@ -1205,6 +1446,7 @@ export class _QRScanner {
           oy: 0,
           fine,
         },
+        search: false,
         found: false,
         inverted: new Uint8Array(centers),
         setCount: 0,
@@ -1249,6 +1491,15 @@ export class _QRScanner {
     this.mapQuad(out);
   }
 
+  // Grow the module grid, function map and codeword scratch to one symbol size: a scanner
+  // that only ever meets small symbols never pays for Version 40.
+  private reserve(size: number): void {
+    if (this.grid.length >= size * size) return;
+    this.grid = new Uint8Array(size * size);
+    this.tmp8 = new Uint8Array(size * size);
+    this.codewords = new Uint8Array(BYTES[(size - 17) / 4 - 1]);
+  }
+
   // Fill the reusable alignment-position prefix for one QR version and return its length.
   private setAlignments(ver: number): number {
     if (ver === 1) return 0;
@@ -1289,6 +1540,9 @@ export class _QRScanner {
       const layer = this.layers[i] as ScannerLayer;
       const used = !i || Math.min(aw, ah) >= 64;
       layer.used = used;
+      // A frame too small for a half layer (shorter side under 128) always searches native.
+      layer.search =
+        used && (i > 0 || Math.min(aw, ah) <= this.nativeLimit || Math.min(aw, ah) < 128);
       layer.width = used ? aw : 0;
       layer.height = used ? ah : 0;
       layer.words = used ? Math.ceil(aw / 32) : 0;
@@ -1322,11 +1576,17 @@ export class _QRScanner {
       this.payload.bytes.fill(0);
       // Lifecycle wipe, not per-frame: every typed-array field on the scanner and its layers is
       // a zero-target arena, so sweep them reflectively — new arenas cannot be forgotten here.
-      // Object.values allocates; acceptable outside the frame loop. Layer zero's luma aliases
-      // the scanner's, so the double fill is harmless.
+      // Object.values allocates; acceptable outside the frame loop. The two aliases are skipped
+      // by identity: lumaWords views its layer's luma, and layer zero's luma is the scanner's.
       for (const v of Object.values(this)) if (ArrayBuffer.isView(v)) (v as Uint8Array).fill(0);
       for (const layer of this.layers as ScannerLayer[]) {
-        for (const v of Object.values(layer)) if (ArrayBuffer.isView(v)) (v as Uint8Array).fill(0);
+        for (const v of Object.values(layer))
+          if (
+            ArrayBuffer.isView(v) &&
+            v !== layer.lumaWords &&
+            (v !== layer.luma || v !== this.luma)
+          )
+            (v as Uint8Array).fill(0);
         layer.blockHeight = 0;
         layer.blockWidth = 0;
         layer.height = 0;
@@ -1336,6 +1596,7 @@ export class _QRScanner {
         layer.setCount = 0;
         layer.setCursor = 0;
         layer.used = false;
+        layer.search = false;
         layer.found = false;
         layer.setsReady = false;
       }
@@ -2011,25 +2272,42 @@ export class _QRScanner {
             }
           const bytes = this.codewords;
           const total = BYTES[ver - 1];
-          bytes.fill(0, 0, total);
+          const limit = 8 * total;
+          const grid = this.grid;
           let bit = 0;
+          let acc = 0;
           let dir = -1;
           let y = size - 1;
           for (let xOffset = size - 1; xOffset > 0; xOffset -= 2) {
             if (xOffset === 6) xOffset = 6 - 1;
+            // Mask predicates repeat every 12 rows: pack one period per column into a word.
+            let mask0 = 0;
+            let mask1 = 0;
+            for (let i = 0; i < 12; i++) {
+              mask0 |= ((maskBits(xOffset, i) >> mask) & 1) << i;
+              mask1 |= ((maskBits(xOffset - 1, i) >> mask) & 1) << i;
+            }
+            let ym = y % 12;
             for (;;) {
+              const row = y * size;
               for (let j = 0; j < 2; j++) {
                 const x = xOffset - j;
-                if (fun[y * size + x]) continue;
-                if (
-                  bit < 8 * total &&
-                  (this.grid[y * size + x] ^ ((maskBits(x, y) >> mask) & 1)) === 1
-                )
-                  bytes[bit >> 3] |= 0x80 >> (bit & 7);
+                if (fun[row + x]) continue;
+                // Codewords fill in walk order, so each byte lands whole after its eighth bit.
+                if (bit < limit) {
+                  acc = (acc << 1) | (grid[row + x] ^ (((j ? mask1 : mask0) >> ym) & 1));
+                  if ((bit & 7) === 7) {
+                    bytes[bit >> 3] = acc;
+                    acc = 0;
+                  }
+                }
                 bit++;
               }
               if (y + dir < 0 || y + dir >= size) break;
               y += dir;
+              ym += dir;
+              if (ym < 0) ym = 11;
+              else if (ym === 12) ym = 0;
             }
             dir = -dir;
           }
@@ -2070,17 +2348,36 @@ export class _QRScanner {
             correct: {
               // Byte offsets in tmp8: syndromes, sigma, previous, and next. All four are live
               // during Berlekamp-Massey; previous/next become omega/locations afterward.
-              let hasError = false;
-              for (let i = 0; i < words; i++) {
-                let value = 0;
-                for (let j = 0; j < length; j++)
-                  value = mul(value, EXP[i]) ^ blockBytes[offset + j];
-                fun[syndromes + i] = value;
-                if (value) hasError = true;
+              // The generator divides an intact block: a zero LFSR remainder, computed exactly
+              // as the encoder does from its products table, settles the common case without
+              // syndromes (a zero remainder and all-zero syndromes are the same condition).
+              // Coefficient j lives in byte j & 3 of word j >> 2; the top word's spare bytes shift
+              // in zeros and fold zero products, so they stay zero.
+              const products = rsCached(words).mul32;
+              const rem = this.remainder;
+              const stride = (words + 3) >> 2;
+              const last = stride - 1;
+              rem.fill(0, 0, stride);
+              for (let i = 0; i < length; i++) {
+                const base = (blockBytes[offset + i] ^ (rem[0] & 0xff)) * stride;
+                for (let j = 0; j < last; j++)
+                  rem[j] = ((rem[j] >>> 8) | (rem[j + 1] << 24)) ^ products[base + j];
+                rem[last] = (rem[last] >>> 8) ^ products[base + last];
               }
-              if (!hasError) {
+              let dirty = 0;
+              for (let j = 0; j < stride; j++) dirty |= rem[j];
+              if (!dirty) {
                 corrected = true;
                 break correct;
+              }
+              // The register holds x^words * C(x) mod g(x), which agrees with the block at every
+              // generator root up to the factor alpha^(i * words), so the syndromes come from its
+              // `words` coefficients instead of the whole block.
+              for (let k = 0; k < words; k++) fun[next + k] = (rem[k >> 2] >> ((k & 3) * 8)) & 0xff;
+              for (let i = 0; i < words; i++) {
+                let value = 0;
+                for (let k = 0; k < words; k++) value = mul(value, EXP[i]) ^ fun[next + k];
+                fun[syndromes + i] = mul(value, EXP[255 - ((i * words) % 255)]);
               }
               fun.fill(0, sigma, sigma + words + 1);
               fun.fill(0, previous, previous + words + 1);
@@ -2170,21 +2467,49 @@ export class _QRScanner {
     s: Plane,
     map: Float64Array,
     size: number,
-    left = 0,
-    right = size,
-    top = 0,
-    bottom = size
+    left: number,
+    right: number,
+    top: number,
+    bottom: number
   ): void {
-    for (let y = top; y < bottom; y++)
+    const { W, H, d, cut, sh, bw } = s;
+    const grid = this.grid;
+    const inverted = this.invertedProjection;
+    const m0 = map[0];
+    const m1 = map[1];
+    const m2 = map[2];
+    const m3 = map[3];
+    const m4 = map[4];
+    const m5 = map[5];
+    const m6 = map[6];
+    const m7 = map[7];
+    const m8 = map[8];
+    // read() unrolled: each row's homography terms are products of one module coordinate,
+    // computed once per row and summed in read()'s order.
+    for (let y = top; y < bottom; y++) {
+      const my = y + 0.5;
+      const rx = m1 * my;
+      const ry = m4 * my;
+      const rd = m7 * my;
       for (let x = left; x < right; x++) {
-        this.grid[y * size + x] = this.read(s, map, x + 0.5, y + 0.5);
+        const mx = x + 0.5;
+        const den = m6 * mx + rd + m8;
+        const px = Math.floor((m0 * mx + rx + m2) / den);
+        const py = Math.floor((m3 * mx + ry + m5) / den);
+        let value = 0;
+        if (px >= 0 && py >= 0 && px < W && py < H) {
+          const dark = d[py * W + px] <= cut[(py >> sh) * bw + (px >> sh)];
+          value = dark !== inverted ? 1 : 0;
+        }
+        grid[y * size + x] = value;
       }
+    }
   }
 
   // Timing prefilter + global grid projection against one plane.
   private projectMap(s: Plane, map: Float64Array, size: number, ctx: Ctx): Attempt {
     const ok = this.timing(s, map, size);
-    if (ok) this.projectQuad(s, map, size);
+    if (ok) this.projectQuad(s, map, size, 0, size, 0, size);
     return ok ? this.decodeGrid(size, ctx) : FAIL.timing;
   }
 
@@ -2251,6 +2576,7 @@ export class _QRScanner {
         )
           continue;
         this.decodedSize = size;
+        this.reserve(size);
         // A located bottom-right alignment pattern upgrades the affine BR estimate to perspective.
         const f = 1 - (3.5 - 0.5) / (size - 7);
         const brEstX = tl.x + (tr.x - tl.x + bl.x - tl.x) * f;
@@ -2481,7 +2807,7 @@ export class _QRScanner {
         )
           break walk;
         const layer = layers[i];
-        if (!layer.used) continue;
+        if (!layer.used || !layer.search) continue;
         /**
          * The frame reader has already written grayscale luma. Keeping thresholding on that plane
          * avoids packed-color conversion in the dominant camera path.

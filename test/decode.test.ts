@@ -327,6 +327,7 @@ it('decodeQR validates its complete public image and option surface', () => {
     ['effort zero', img, { effort: 0 }],
     ['effort fractional', img, { effort: 1.5 }],
     ['timeLimit negative', img, { timeLimit: -1 }],
+    ['nativeLimit negative', img, { nativeLimit: -1 }],
     ['width type', { ...img, width: String(img.width) }, {}],
     ['width range', { ...img, width: 0 }, {}],
     ['height integer', { ...img, height: img.height + 0.5 }, {}],
@@ -1867,5 +1868,31 @@ for (const category of listFiles(DETECTION_PATH, true)) {
     deepStrictEqual(mismatches, []);
   });
 }
+
+it('decodeQR nativeLimit searches large frames on the half layer only', () => {
+  const text = 'NATIVE LIMIT';
+  const place = (scale: number, side: number) => {
+    const symbol = matrixToImage(encodeQR(text, 'raw', { border: 4 }), scale);
+    const data = new Uint8Array(side * side * 4).fill(255);
+    const x0 = (side - symbol.width) >> 1;
+    const y0 = (side - symbol.height) >> 1;
+    for (let y = 0; y < symbol.height; y++)
+      data.set(
+        symbol.data.subarray(y * symbol.width * 4, (y + 1) * symbol.width * 4),
+        ((y0 + y) * side + x0) * 4
+      );
+    return { width: side, height: side, data };
+  };
+  // Four pixels per module survive the 2x2 box filter; the limit below the frame side
+  // skips native search and the symbol is still decoded from the half layer.
+  deepStrictEqual(readQR(place(4, 512), { nativeLimit: 256 }), text);
+  // One pixel per module needs the native search: the same limit misses, and the
+  // default (Infinity) or a limit at the frame side finds it.
+  throws(() => readQR(place(1, 512), { nativeLimit: 256 }));
+  deepStrictEqual(readQR(place(1, 512)), text);
+  deepStrictEqual(readQR(place(1, 512), { nativeLimit: 512 }), text);
+  // A frame too small for a half layer is always searched natively.
+  deepStrictEqual(readQR(place(1, 100), { nativeLimit: 0 }), text);
+});
 
 it.runWhen(import.meta.url);

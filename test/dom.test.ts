@@ -443,6 +443,39 @@ it('QRCanvas accepts an internal reusable scanner constructor', () => {
   }
 });
 
+it('QRCanvas forwards nativeLimit and forces native search every nativeEvery-th frame', () => {
+  const previousCreate = document.createElement.bind(document);
+  const seen: number[] = [];
+  class Scanner {
+    luma = SHARED_SCANNER_LUMA;
+    nativeLimit = Infinity;
+    constructor(opts: { nativeLimit?: number }) {
+      seen.push(opts.nativeLimit ?? -1);
+    }
+    addImage() {
+      seen.push(this.nativeLimit);
+    }
+    processImage() {}
+    decode() {
+      return ['SCANNER'];
+    }
+    clean() {}
+  }
+  document.createElement = ((name: string) =>
+    name === 'canvas'
+      ? (new FakeCanvas() as any)
+      : previousCreate(name)) as typeof document.createElement;
+  try {
+    const gated = new QRCanvas({}, { nativeLimit: 720 }, Scanner);
+    for (let i = 0; i < 3; i++) gated.drawImage({} as CanvasImageSource, 4, 5);
+    const every = new QRCanvas({}, { nativeLimit: 720, nativeEvery: 3 }, Scanner);
+    for (let i = 0; i < 6; i++) every.drawImage({} as CanvasImageSource, 4, 5);
+    deepStrictEqual(seen, [720, 720, 720, 720, 720, 720, 720, Infinity, 720, 720, Infinity]);
+  } finally {
+    document.createElement = previousCreate;
+  }
+});
+
 it('QRCanvas routes optional async decoding through the reusable scanner', async () => {
   const previousCreate = document.createElement.bind(document);
   const calls: unknown[] = [];
@@ -595,6 +628,7 @@ it(
     try {
       const player = previousCreate('video');
       Object.defineProperties(player, {
+        readyState: { configurable: true, value: 2 },
         videoWidth: { configurable: true, value: 6 },
         videoHeight: { configurable: true, value: 4 },
       });
@@ -1539,6 +1573,7 @@ it('QRCamera decodes padded WebCodecs formats with reusable buffers', async () =
       source = videoFrameSource(format, width, height, luma);
       const player = previousCreate('video');
       Object.defineProperties(player, {
+        readyState: { configurable: true, value: 2 },
         videoWidth: { configurable: true, value: width },
         videoHeight: { configurable: true, value: height },
       });

@@ -157,7 +157,7 @@ export type _QRScannerLike = Pick<
   _QRScanner,
   'addImage' | 'clean' | 'decode' | 'luma' | 'processImage'
 > &
-  Partial<Pick<_QRScanner, 'decodeAsync'>>;
+  Partial<Pick<_QRScanner, 'decodeAsync' | 'nativeLimit'>>;
 export type _QRScannerConstructor = new (opts: QRScannerOpts) => _QRScannerLike;
 
 /** `QRCanvas` drawing and decode options. */
@@ -184,6 +184,18 @@ export type QRCanvasOpts = {
   effort?: number;
   /** Milliseconds available to optional scanner retries. */
   timeLimit?: number;
+  /**
+   * Skip the full-resolution finder search on frames whose shorter side exceeds this many
+   * pixels; symbols are found on the half-resolution layer and still sampled from native
+   * luma. Unset searches every layer.
+   */
+  nativeLimit?: number;
+  /**
+   * With `nativeLimit`: every this-many-th frame searches full resolution regardless, so a
+   * small symbol on a large frame is still found within a few frames. One searches native
+   * on every frame the limit allows.
+   */
+  nativeEvery: number;
   /** Draw the terminal failed QR hypothesis as a red data region. */
   drawFailed: boolean;
   /**
@@ -230,6 +242,7 @@ type ScannedFrame = {
 };
 
 type CanvasReader = {
+  busy(): boolean;
   clean(): void;
   crop: boolean;
   luma: Uint8Array;
@@ -285,6 +298,7 @@ export class QRCanvas {
   private inputWidth = 0;
   private inputHeight = 0;
   private frameSource?: 'VideoFrame' | 'canvas';
+  private frames = 0;
   private main: CanvasWithContext;
   private overlay?: CanvasWithContext;
   private resultQR?: CanvasWithContext;
@@ -306,6 +320,7 @@ export class QRCanvas {
       cropToSquare: true,
       decodeAll: false,
       async: false,
+      nativeEvery: 1,
       drawFailed: false,
       ...opts,
     };
@@ -324,6 +339,7 @@ export class QRCanvas {
     };
     if (this.opts.effort !== undefined) decoder.effort = this.opts.effort;
     if (this.opts.timeLimit !== undefined) decoder.timeLimit = this.opts.timeLimit;
+    if (this.opts.nativeLimit !== undefined) decoder.nativeLimit = this.opts.nativeLimit;
     if (this.overlay)
       decoder.pointsOnDetect = (points, result) => {
         if (Date.now() - this.lastDetect > this.opts.overlayTimeout) {
@@ -406,6 +422,7 @@ export class QRCanvas {
       };
     this.scanner = new _scanner(decoder);
     this.reader = {
+      busy: () => !!this.pending,
       clean: () => {
         this.generation++;
         this.task?.abort();
@@ -647,6 +664,12 @@ export class QRCanvas {
     size?: Size
   ): QRCanvasResult | Promise<QRCanvasResult | undefined> | undefined {
     if (this.pending) return;
+    this.frames++;
+    if (this.opts.nativeLimit !== undefined) {
+      const every = this.opts.nativeEvery;
+      this.scanner.nativeLimit =
+        every > 1 && this.frames % every === 0 ? Infinity : this.opts.nativeLimit;
+    }
     this.bitmapDrawn = false;
     this.overlayDrawn = false;
     this.overlayBatch.length = 0;
@@ -966,6 +989,8 @@ export class QRCamera {
     player.setAttribute('autoplay', '');
     player.setAttribute('muted', '');
     player.setAttribute('playsinline', '');
+    // The muted attribute is only the default; the property is the state autoplay checks.
+    player.muted = true;
     player.srcObject = stream;
   }
   /**
@@ -1034,7 +1059,11 @@ export class QRCamera {
       this.videoFrame = false;
       return this.draw(canvas, fullSize);
     }
-    if (this.reading) return;
+    // Before the first decoded frame the constructor throws, which the fallback
+    // below would read as missing support; the frame is simply not here yet.
+    if (this.player.readyState < 2) return;
+    // An async decode still reads the arena; a new frame must not land in it.
+    if (this.reading || reader.busy()) return;
     this.reading = true;
     const source = this.source;
     let frame: VideoFrame;

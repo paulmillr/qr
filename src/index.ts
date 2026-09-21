@@ -181,50 +181,53 @@ function rsGenerator(eccWords: number): Uint8Array {
   return gen;
 }
 
-type RsCache = { gen: Uint8Array; mul: Uint8Array };
+type RsCache = { gen: Uint8Array; mul: Uint8Array; mul32: Int32Array };
 const RS_CACHE: (RsCache | undefined)[] = [];
 
 // Generator and all coefficient*feedback products, shared by every symbol
-// with the same parity length; entries are generated lazily.
+// with the same parity length; entries are generated lazily. `mul32` holds
+// the same products four to a word (coefficient j in byte j & 3 of word
+// j >> 2) for the word-wise remainder loop.
 function rsCached(eccWords: number): RsCache {
   let cached = RS_CACHE[eccWords];
   if (cached !== undefined) return cached;
   const gen = rsGenerator(eccWords);
   const { exp: EXP, log: LOG } = GF256;
   const mul = new Uint8Array(256 * eccWords);
+  const stride = (eccWords + 3) >>> 2;
+  const mul32 = new Int32Array(256 * stride);
   for (let f = 1; f < 256; f++) {
     const lf = LOG[f];
     const off = f * eccWords;
     for (let j = 0; j < eccWords; j++) {
       const c = gen[j];
-      if (c) mul[off + j] = EXP[LOG[c] + lf];
+      if (c) mul32[f * stride + (j >>> 2)] |= (mul[off + j] = EXP[LOG[c] + lf]) << (8 * (j & 3));
     }
   }
-  return (RS_CACHE[eccWords] = { gen, mul });
+  return (RS_CACHE[eccWords] = { gen, mul, mul32 });
 }
 
-// Reed-Solomon parity via LFSR remainder.
-function rsEcc(data: Uint8Array, gen: Uint8Array, mul?: Uint8Array): Uint8Array {
-  const { exp: EXP, log: LOG } = GF256;
+const RS_TMP = /* @__PURE__ */ new Int32Array(8);
+// Reed-Solomon parity via LFSR remainder, four coefficients a word: each
+// data byte shifts the remainder down one byte across the words and XORs
+// in the packed products row of the feedback byte.
+function rsEcc(data: Uint8Array, gen: Uint8Array, mul32: Int32Array): Uint8Array {
   const eccWords = gen.length;
-  const res = new Uint8Array(eccWords);
-  if (mul !== undefined) {
-    const last = eccWords - 1;
-    for (let i = 0; i < data.length; i++) {
-      const off = (data[i] ^ res[0]) * eccWords;
-      for (let j = 0; j < last; j++) res[j] = res[j + 1] ^ mul[off + j];
-      res[last] = mul[off + last];
-    }
-    return res;
-  }
+  const stride = mul32.length >>> 8;
+  const last = stride - 1;
+  const w = RS_TMP.fill(0, 0, stride);
   for (let i = 0; i < data.length; i++) {
-    const f = data[i] ^ res[0];
-    res.copyWithin(0, 1);
-    res[eccWords - 1] = 0;
-    if (f) {
-      for (let j = 0; j < eccWords; j++) if (gen[j]) res[j] ^= EXP[LOG[gen[j]] + LOG[f]];
+    let cur = w[0];
+    const off = (data[i] ^ (cur & 0xff)) * stride;
+    for (let k = 0; k < last; k++) {
+      const next = w[k + 1];
+      w[k] = ((cur >>> 8) | (next << 24)) ^ mul32[off + k];
+      cur = next;
     }
+    w[last] = (cur >>> 8) ^ mul32[off + last];
   }
+  const res = new Uint8Array(eccWords);
+  for (let j = 0; j < eccWords; j++) res[j] = w[j >>> 2] >>> (8 * (j & 3));
   return res;
 }
 
@@ -319,7 +322,7 @@ function encodeData(
   for (let i = 0, pos = 0; i < numBlocks; i++) {
     const len = blockLen + (i < shortBlocks ? 0 : 1);
     blocks.push(bytes.subarray(pos, pos + len));
-    eccs.push(rsEcc(blocks[i], rs.gen, rs.mul));
+    eccs.push(rsEcc(blocks[i], rs.gen, rs.mul32));
     pos += len;
   }
   const res = new Uint8Array(bytes.length + words * numBlocks);
@@ -336,7 +339,7 @@ function encodeData(
  * 8-bit vector (bit m set when mask predicate m fires at x,y). Shared with
  * the decoder, which tests a single mask's bit to unmask read modules.
  */
-function maskBits(x: number, y: number): number {
+function maskCalc(x: number, y: number): number {
   const x2 = x % 2;
   const y2 = y % 2;
   const x3 = x % 3;
@@ -353,6 +356,16 @@ function maskBits(x: number, y: number): number {
   if (((x2 ^ y2) + xy3) % 2 === 0) bits |= 128;
   return bits;
 }
+// Every predicate is periodic in 6 columns and 12 rows, so the vector is a
+// 72-entry lookup filled once from the arithmetic.
+const MASK_TABLE: Uint8Array = /* @__PURE__ */ (() => {
+  const t = new Uint8Array(72);
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 6; x++) t[y * 6 + x] = maskCalc(x, y);
+  return t;
+})();
+function maskBits(x: number, y: number): number {
+  return MASK_TABLE[(y % 12) * 6 + (x % 6)];
+}
 
 const POP16: Uint8Array = /* @__PURE__ */ (() => {
   const t = new Uint8Array(1 << 16);
@@ -361,31 +374,35 @@ const POP16: Uint8Array = /* @__PURE__ */ (() => {
 })();
 const popcnt = (n: number): number => POP16[n & 0xffff] + POP16[n >>> 16];
 
-const TRANSPOSE_TMP = /* @__PURE__ */ new Uint32Array(32);
+const TRANSPOSE_TMP = /* @__PURE__ */ new Int32Array(32);
 // 32x32 in-place bit-matrix transpose (butterfly network).
-function transpose32(a: Uint32Array): void {
+function transpose32(a: Int32Array): void {
   const masks = [0x55555555, 0x33333333, 0x0f0f0f0f, 0x00ff00ff, 0x0000ffff];
   for (let stage = 0; stage < 5; stage++) {
-    const m = masks[stage] >>> 0;
+    const m = masks[stage];
     const s = 1 << stage;
     for (let i = 0; i < 32; i += s << 1) {
       for (let k = 0; k < s; k++) {
-        const x = a[i + k] >>> 0;
-        const y = a[i + k + s] >>> 0;
+        const x = a[i + k];
+        const y = a[i + k + s];
         const t = ((x >>> s) ^ y) & m;
-        a[i + k] = (x ^ (t << s)) >>> 0;
-        a[i + k + s] = (y ^ t) >>> 0;
+        a[i + k] = x ^ (t << s);
+        a[i + k + s] = y ^ t;
       }
     }
   }
 }
 
-// Packed square bit matrix: LSB-first bits, `words` u32 per row. Bits at
+// Packed square bit matrix: LSB-first bits, `words` i32 per row. Bits at
 // x >= size are kept zero — the penalty scanners rely on that invariant.
-type Mat = { size: number; words: number; v: Uint32Array };
+// Signed words on purpose: every consumer is bitwise or popcount, and a
+// v1 symbol never sets bit 31, so an engine that meets v1 first specializes
+// on int32; the first full word from a Uint32Array then arrives as a double
+// and the recompiled mixed-type code stays slower for the whole process.
+type Mat = { size: number; words: number; v: Int32Array };
 const mat = (size: number): Mat => {
   const words = (size + 31) >>> 5;
-  return { size, words, v: new Uint32Array(words * size) };
+  return { size, words, v: new Int32Array(words * size) };
 };
 const matGet = (m: Mat, x: number, y: number): number =>
   (m.v[y * m.words + (x >>> 5)] >>> (x & 31)) & 1;
@@ -416,12 +433,12 @@ function transposeMat(src: Mat, dst: Mat): void {
 // each run contributes (L-4) windows plus one run-start window counted twice.
 function runsPenaltyVertical(m: Mat): number {
   const { size, words, v } = m;
-  const tail = size & 31 ? ((1 << (size & 31)) - 1) >>> 0 : 0xffffffff;
+  const tail = size & 31 ? ~(-1 << (size & 31)) : -1;
   let score = 0;
   for (let wi = 0; wi < words; wi++) {
-    const valid = wi === words - 1 ? tail : 0xffffffff;
+    const valid = wi === words - 1 ? tail : -1;
     let r3 = v[3 * words + wi];
-    let dPrev = 0xffffffff;
+    let dPrev = -1;
     let d0 = v[wi] ^ v[words + wi];
     let d1 = v[words + wi] ^ v[2 * words + wi];
     let d2 = v[2 * words + wi] ^ r3;
@@ -429,7 +446,7 @@ function runsPenaltyVertical(m: Mat): number {
       const r4 = v[idx];
       const d3 = r3 ^ r4;
       const w = ~(d0 | d1 | d2 | d3) & valid;
-      if (w) score += popcnt(w >>> 0) + 2 * popcnt((w & dPrev) >>> 0);
+      if (w) score += popcnt(w) + 2 * popcnt(w & dPrev);
       dPrev = d0;
       d0 = d1;
       d1 = d2;
@@ -444,26 +461,38 @@ function runsPenaltyVertical(m: Mat): number {
 // both patterns at once across a 32-column stripe.
 function finderPenaltyVertical(m: Mat): number {
   const { size, words, v } = m;
-  const tail = size & 31 ? ((1 << (size & 31)) - 1) >>> 0 : 0xffffffff;
+  const tail = size & 31 ? ~(-1 << (size & 31)) : -1;
   let count = 0;
   for (let wi = 0; wi < words; wi++) {
-    const valid = wi === words - 1 ? tail : 0xffffffff;
+    const valid = wi === words - 1 ? tail : -1;
+    // The eleven-row window rolls down the stripe: ten words load once per
+    // column, then each row step loads one new word and shifts the rest.
+    let i = wi;
+    let r0 = v[i];
+    let r1 = v[(i += words)];
+    let r2 = v[(i += words)];
+    let r3 = v[(i += words)];
+    let r4 = v[(i += words)];
+    let r5 = v[(i += words)];
+    let r6 = v[(i += words)];
+    let r7 = v[(i += words)];
+    let r8 = v[(i += words)];
+    let r9 = v[(i += words)];
     for (let y = 0; y <= size - 11; y++) {
-      let i = y * words + wi;
-      const r0 = v[i];
-      const r1 = v[(i += words)];
-      const r2 = v[(i += words)];
-      const r3 = v[(i += words)];
-      const r4 = v[(i += words)];
-      const r5 = v[(i += words)];
-      const r6 = v[(i += words)];
-      const r7 = v[(i += words)];
-      const r8 = v[(i += words)];
-      const r9 = v[(i += words)];
-      const r10 = v[i + words];
+      const r10 = v[(i += words)];
       const m0 = valid & r0 & ~r1 & r2 & r3 & r4 & ~r5 & r6 & ~(r7 | r8 | r9 | r10);
       const m1 = valid & ~(r0 | r1 | r2 | r3) & r4 & ~r5 & r6 & r7 & r8 & ~r9 & r10;
-      count += popcnt(m0 >>> 0) + popcnt(m1 >>> 0);
+      count += popcnt(m0) + popcnt(m1);
+      r0 = r1;
+      r1 = r2;
+      r2 = r3;
+      r3 = r4;
+      r4 = r5;
+      r5 = r6;
+      r6 = r7;
+      r7 = r8;
+      r8 = r9;
+      r9 = r10;
     }
   }
   return count;
@@ -487,13 +516,13 @@ function penaltyScore(m: Mat, t: Mat, limit: number = Infinity): number {
   if (adjacent >= limit) return adjacent;
   // N2: 3 points per 2x2 same-color box (overlapping). Valid left-edge
   // positions in the last word: one less than the bits it actually holds.
-  const tail2 = ((1 << (size - 32 * (words - 1) - 1)) - 1) >>> 0;
+  const tail2 = ~(-1 << (size - 32 * (words - 1) - 1));
   let boxes = 0;
   let dark = 0;
   for (let y = 0; y < size; y++) {
     for (let wi = 0; wi < words; wi++) {
       const a0 = v[y * words + wi];
-      dark += popcnt(a0 >>> 0);
+      dark += popcnt(a0);
       if (y === size - 1) continue;
       const a1 = v[(y + 1) * words + wi];
       const n0 = wi + 1 < words ? v[y * words + wi + 1] : 0;
@@ -503,7 +532,7 @@ function penaltyScore(m: Mat, t: Mat, limit: number = Infinity): number {
       const eqH1 = ~(a1 ^ ((a1 >>> 1) | (n1 << 31)));
       let w = eqV & eqH0 & eqH1;
       if (wi === words - 1) w &= tail2;
-      boxes += popcnt(w >>> 0);
+      boxes += popcnt(w);
     }
   }
   const total = size * size;
@@ -550,10 +579,11 @@ function drawInfo(m: Mat, ver: number, ecc: ErrorCorrection, mask: number): void
 // overwhelmingly encode one version repeatedly; worst case (v40) ~190KB.
 type SymCache = {
   ver: number;
-  tpl: Uint32Array;
+  tpl: Int32Array;
   pos: Uint16Array;
-  planes: Uint32Array[];
-  planesT: Uint32Array[];
+  pair: Int32Array;
+  planes: Int32Array[];
+  planesT: Int32Array[];
   work: [Mat, Mat, Mat, Mat];
 };
 let symCache: SymCache | undefined;
@@ -645,6 +675,18 @@ function buildSymCache(ver: number): SymCache {
       if (y + dir < 0 || y + dir >= size) break;
     }
   }
+  // The zigzag fills a two-module column, so consecutive positions mostly
+  // sit side by side in one word: such a pair is placed as one 2-bit OR.
+  // Entries are (wordIndex << 6 | shift << 1 | 1), or 0 where the pair
+  // straddles a word or a function pattern.
+  const pair = new Int32Array(n >>> 1);
+  for (let i = 0; i + 1 < n; i += 2) {
+    const a = posBuf[i];
+    const b = posBuf[i + 1];
+    if (a >>> 5 === b >>> 5 && (a & 31) === (b & 31) + 1) {
+      pair[i >>> 1] = ((a >>> 5) << 6) | ((b & 31) << 1) | 1;
+    }
+  }
   const planesT = planes.map((p) => {
     const t = mat(size);
     transposeMat(p, t);
@@ -654,6 +696,7 @@ function buildSymCache(ver: number): SymCache {
     ver,
     tpl: m.v,
     pos: posBuf.slice(0, n),
+    pair,
     planes: planes.map((p) => p.v),
     planesT,
     work: [mat(size), mat(size), mat(size), mat(size)],
@@ -672,14 +715,24 @@ function drawSymbol(
   test = false
 ): Mat {
   if (symCache === undefined || symCache.ver !== ver) symCache = buildSymCache(ver);
-  const { tpl, pos, planes, planesT, work } = symCache;
+  const { tpl, pos, pair, planes, planesT, work } = symCache;
   const [m, t, cand, candT] = work;
   m.v.set(tpl);
   const need = Math.min(8 * data.length, pos.length); // trailing remainder bits stay 0
-  for (let i = 0; i < need; i++) {
-    if (data[i >>> 3] & (0x80 >>> (i & 7))) {
-      const p = pos[i];
-      m.v[p >>> 5] |= 1 << (p & 31);
+  for (let i = 0; i < need; i += 2) {
+    const two = (data[i >>> 3] >>> (6 - (i & 7))) & 3;
+    if (two === 0) continue;
+    const pr = pair[i >>> 1];
+    if (pr & 1) m.v[pr >>> 6] |= two << ((pr >>> 1) & 31);
+    else {
+      if (two & 2) {
+        const p = pos[i];
+        m.v[p >>> 5] |= 1 << (p & 31);
+      }
+      if (two & 1) {
+        const p = pos[i + 1];
+        m.v[p >>> 5] |= 1 << (p & 31);
+      }
     }
   }
   let mask = maskIdx;
@@ -780,25 +833,62 @@ const CTRL = [10, 27]; // [newline, ESC]
 const NL = /* @__PURE__ */ String.fromCharCode(CTRL[0]);
 
 function renderRaw(r: Raster): boolean[][] {
-  const W = r.W;
+  const { m, W, map } = r;
   const res: boolean[][] = new Array(W);
+  const { words, v } = m;
   for (let y = 0; y < W; y++) {
+    const my = map[y];
     const row: boolean[] = new Array(W);
-    for (let x = 0; x < W; x++) row[x] = dark(r, x, y);
+    if (my < 0) {
+      for (let x = 0; x < W; x++) row[x] = false;
+    } else {
+      const base = my * words;
+      for (let x = 0; x < W; x++) {
+        const mx = map[x];
+        row[x] = mx >= 0 && ((v[base + (mx >>> 5)] >>> (mx & 31)) & 1) === 1;
+      }
+    }
     res[y] = row;
   }
   return res;
 }
 
+// Half-block glyphs by (upper, lower) darkness, and every four-cell
+// sequence of them, so a line grows four glyphs per concatenation.
+const GLYPH = ['█', '▀', '▄', ' '];
+const QUAD: string[] = /* @__PURE__ */ (() => {
+  const t: string[] = [];
+  for (let i = 0; i < 256; i++)
+    t.push(GLYPH[i >> 6] + GLYPH[(i >> 4) & 3] + GLYPH[(i >> 2) & 3] + GLYPH[i & 3]);
+  return t;
+})();
+
 function renderAscii(r: Raster): string {
-  const W = r.W;
+  const { m, W, map } = r;
+  const { words, v } = m;
   let out = '';
   for (let y = 0; y < W; y += 2) {
+    const my0 = map[y];
+    const my1 = y + 1 < W ? map[y + 1] : -2; // past the bottom edge reads dark
+    const b0 = my0 * words;
+    const b1 = my1 * words;
+    let acc = 0;
+    let n = 0;
     for (let x = 0; x < W; x++) {
-      const first = dark(r, x, y);
-      const second = y + 1 >= W ? true : dark(r, x, y + 1);
-      out += !first && !second ? '█' : !first && second ? '▀' : first && !second ? '▄' : ' ';
+      const mx = map[x];
+      let g = my1 === -2 ? 1 : 0;
+      if (mx >= 0) {
+        if (my0 >= 0 && (v[b0 + (mx >>> 5)] >>> (mx & 31)) & 1) g |= 2;
+        if (my1 >= 0 && (v[b1 + (mx >>> 5)] >>> (mx & 31)) & 1) g |= 1;
+      }
+      acc = (acc << 2) | g;
+      if (++n === 4) {
+        out += QUAD[acc];
+        acc = 0;
+        n = 0;
+      }
     }
+    for (let i = 0; i < n; i++) out += GLYPH[(acc >> (2 * (n - 1 - i))) & 3];
     out += NL;
   }
   return out;
@@ -818,25 +908,58 @@ function renderTerm(r: Raster): string {
   return out;
 }
 
+// Character counts of a path coordinate and of a signed move offset, so the
+// shorter move command is chosen without building both.
+const digits = (n: number): number =>
+  n < 10 ? 1 : n < 100 ? 2 : n < 1000 ? 3 : n < 10000 ? 4 : String(n).length;
+const chars = (d: number): number => (d < 0 ? 1 + digits(-d) : digits(d));
+
+// Finished path commands for the two common relative moves (same row, next
+// row) with the `h-1` return, keyed by (dy, dx) for one output width: the
+// coordinates never change between symbols of the same size, so the number
+// formatting is paid once per distinct move.
+let svgCache: { W: number; cmds: string[] } | undefined;
+
 function renderSvg(r: Raster, optimize: boolean): string {
-  const W = r.W;
+  const { m, W, map } = r;
+  const { words, v } = m;
+  if (svgCache === undefined || svgCache.W !== W) svgCache = { W, cmds: new Array(4 * W) };
+  const cmds = svgCache.cmds;
   let out = `<svg viewBox="0 0 ${W} ${W}" xmlns="http://www.w3.org/2000/svg">`;
   let pathData = '';
-  let prev: { x: number; y: number } | undefined;
+  let prevX = 0;
+  let prevY = 0;
+  let hasPrev = false;
   for (let y = 0; y < W; y++) {
+    const my = map[y];
+    if (my < 0) continue;
+    const base = my * words;
     for (let x = 0; x < W; x++) {
-      if (!dark(r, x, y)) continue;
+      const mx = map[x];
+      if (mx < 0 || !((v[base + (mx >>> 5)] >>> (mx & 31)) & 1)) continue;
       if (!optimize) {
         out += `<rect x="${x}" y="${y}" width="1" height="1" />`;
         continue;
       }
-      let mv = `M${x} ${y}`;
-      if (prev) {
-        const rel = `m${x - prev.x} ${y - prev.y}`;
-        if (rel.length <= mv.length) mv = rel;
+      // The shorter move wins, relative on ties; only the winner is built.
+      const dx = x - prevX;
+      const dy = y - prevY;
+      let cmd: string;
+      if (hasPrev && x >= 10 && dy <= 1 && chars(dx) + 1 <= digits(x) + digits(y)) {
+        const k = (2 * dy + 1) * W + dx;
+        cmd = cmds[k];
+        if (cmd === undefined) cmd = cmds[k] = `m${dx} ${dy}h1v1h-1Z`;
+      } else {
+        let mv: string;
+        if (hasPrev) {
+          mv = chars(dx) + chars(dy) <= digits(x) + digits(y) ? `m${dx} ${dy}` : `M${x} ${y}`;
+        } else mv = `M${x} ${y}`;
+        cmd = `${mv}h1v1${x < 10 ? `H${x}` : 'h-1'}Z`;
       }
-      pathData += `${mv}h1v1${x < 10 ? `H${x}` : 'h-1'}Z`;
-      prev = { x, y };
+      pathData += cmd;
+      prevX = x;
+      prevY = y;
+      hasPrev = true;
     }
   }
   if (optimize) out += `<path d="${pathData}"/>`;
@@ -870,33 +993,37 @@ function renderGif(r: Raster): Uint8Array<ArrayBuffer> {
   u16(W);
   out[p++] = 0x00;
   out[p++] = 0x07;
-  // Pixels are emitted from a per-module-row 0/1 buffer, rebuilt only when
-  // the module row changes (border and scale-repeated output rows reuse it),
-  // and block-copied in spans bounded by the LZW chunk boundaries. The span
-  // copy is the load-bearing part: a per-pixel emit loop costs more than the
-  // bit extraction it wraps, so a row buffer alone measures as no win.
+  // Pixel rows are built once per module row (border and scale-repeated
+  // output rows reuse the buffer) and block-copied back to back into the
+  // unused tail of the output, then spread forward chunk by chunk: every
+  // chunk lands at or before its source, so the moves never clobber
+  // pixels still to be copied.
   const { m, map } = r;
+  const { words, v } = m;
   const row = new Uint8Array(W);
+  const src = out.length - 4 - pixels;
   let prevMy = -2;
-  for (let y = 0, i = 0; y < W; y++) {
+  for (let y = 0, q = src; y < W; y++, q += W) {
     const my = map[y];
     if (my !== prevMy) {
       prevMy = my;
       row.fill(0);
-      if (my >= 0) for (let x = 0; x < W; x++) if (map[x] >= 0) row[x] = matGet(m, map[x], my);
-    }
-    for (let x = 0; x < W;) {
-      if (i % N === 0) {
-        const rem = pixels - i;
-        out[p++] = (rem < N ? rem : N) + 1;
-        out[p++] = 0x80; // LZW clear code
+      if (my >= 0) {
+        const base = my * words;
+        for (let x = 0; x < W; x++) {
+          const mx = map[x];
+          if (mx >= 0) row[x] = (v[base + (mx >>> 5)] >>> (mx & 31)) & 1;
+        }
       }
-      const n = Math.min(N - (i % N), W - x);
-      out.set(row.subarray(x, x + n), p);
-      p += n;
-      x += n;
-      i += n;
     }
+    out.set(row, q);
+  }
+  for (let i = 0, s = src; i < pixels; i += N, s += N) {
+    const n = pixels - i < N ? pixels - i : N;
+    out[p++] = n + 1;
+    out[p++] = 0x80; // LZW clear code
+    out.copyWithin(p, s, s + n);
+    p += n;
   }
   if (tail === 0) {
     out[p++] = 1;
@@ -952,9 +1079,13 @@ export function encodeQR(
   const encoding = opts.encoding !== undefined ? opts.encoding : detectType(text);
   if (!LENGTH_BITS[encoding]) err(`invalid encoding=${encoding}`);
   if (encoding !== 'byte') {
-    const alpha = encoding === 'numeric' ? ALPHANUMERIC.slice(0, 10) : ALPHANUMERIC;
-    for (const ch of text) {
-      if (!alpha.includes(ch)) err(`Unknown letter: "${ch}". Allowed: ${alpha}`);
+    const limit = encoding === 'numeric' ? 10 : ALPHANUMERIC.length;
+    for (let i = 0; i < text.length; i++) {
+      const v = ALNUM_VAL[text.charCodeAt(i)]; // undefined past 127
+      if (!(v >= 0 && v < limit)) {
+        const ch = String.fromCodePoint(text.codePointAt(i)!);
+        err(`Unknown letter: "${ch}". Allowed: ${ALPHANUMERIC.slice(0, limit)}`);
+      }
     }
   }
   if (opts.mask !== undefined && (asNum(opts.mask, 'opts.mask') < 0 || opts.mask > 7))
@@ -1049,6 +1180,7 @@ export {
   formatBits as _formatBits,
   maskBits as _maskBits,
   popcnt as _popcnt,
+  rsCached as _rsCached,
   versionBits as _versionBits,
 };
 

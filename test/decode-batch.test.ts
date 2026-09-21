@@ -284,9 +284,9 @@ it('_QRScanner sizes every pyramid arena from its rectangular layer dimensions',
       patterns: patterns.length,
     })),
     [
-      { bitmap: 16 * 256, blocks: 64 * 32, cuts: 64 * 32, luma: 512 * 256, patterns: 74 * 37 * 4 },
-      { bitmap: 8 * 128, blocks: 32 * 16, cuts: 32 * 16, luma: 256 * 128, patterns: 37 * 19 * 4 },
-      { bitmap: 4 * 64, blocks: 16 * 8, cuts: 16 * 8, luma: 128 * 64, patterns: 19 * 10 * 4 },
+      { bitmap: 16 * 256, blocks: 64 * 32, cuts: 64 * 32, luma: 512 * 256, patterns: 64 * 4 },
+      { bitmap: 8 * 128, blocks: 32 * 16, cuts: 32 * 16, luma: 256 * 128, patterns: 64 * 4 },
+      { bitmap: 4 * 64, blocks: 16 * 8, cuts: 16 * 8, luma: 128 * 64, patterns: 64 * 4 },
     ]
   );
   const skinny = new _QRScanner({ maxSize: { width: 4096, height: 1 } });
@@ -298,7 +298,7 @@ it('_QRScanner sizes every pyramid arena from its rectangular layer dimensions',
       luma: luma.length,
       patterns: patterns.length,
     })),
-    [{ bitmap: 128, blocks: 512, cuts: 512, luma: 4096, patterns: 586 * 4 }]
+    [{ bitmap: 128, blocks: 512, cuts: 512, luma: 4096, patterns: 64 * 4 }]
   );
 });
 
