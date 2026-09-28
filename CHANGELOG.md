@@ -1,6 +1,6 @@
 # Changelog for qr
 
-## 0.7.1 (2026-09-28)
+## 0.7.2 (2026-09-28)
 
 - Decoder: additional large speed-up on small symbols, 2x on camera frames
 - Decoder: opt-in `nativeLimit` to skip full-resolution finder search
