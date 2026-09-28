@@ -10,7 +10,7 @@
  * can return to native luma after cheaper low-resolution finder detection.
  * @module
  */
-import type { Size } from './index.ts';
+import type { Size, TArg, TRet } from './index.ts';
 import {
   _ALPHANUMERIC as ALPHANUMERIC,
   _BYTES as BYTES,
@@ -116,7 +116,8 @@ export type _QRLayer = {
   width: number;
   words: number;
 };
-const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+const isLE: boolean = /* @__PURE__ */ (() =>
+  new Uint8Array(new Uint32Array([0x11223344]).buffer)[0] === 0x44)();
 const cap = (value: number, min?: number, max?: number) => {
   let result = value;
   if (max !== undefined) result = Math.min(result, max);
@@ -604,7 +605,12 @@ const validateImage = (
 // Luma of four-byte pixels straight from their words: (r + 2g + b) >> 2 with the fourth
 // byte ignored. The view is signed because an opaque pixel sets the top bit, which an
 // unsigned read would return as a double; every operation below is bitwise.
-const copyWords = (out: Uint8Array, data: Image['data'], byteStart: number, n: number) => {
+const copyWords = (
+  out: TArg<Uint8Array>,
+  data: TArg<Image['data']>,
+  byteStart: number,
+  n: number
+) => {
   const words = new Int32Array(data.buffer, byteStart, n);
   let i = 0;
   for (; i + 3 < n; i += 4) {
@@ -624,7 +630,12 @@ const copyWords = (out: Uint8Array, data: Image['data'], byteStart: number, n: n
 };
 // Luma of three-byte pixels from their words: three words carry four pixels, so a pixel's
 // channels come from the word or word pair that holds them; the tail stays byte-wise.
-const copyTriples = (out: Uint8Array, data: Image['data'], byteStart: number, n: number) => {
+const copyTriples = (
+  out: TArg<Uint8Array>,
+  data: TArg<Image['data']>,
+  byteStart: number,
+  n: number
+) => {
   const words = new Int32Array(data.buffer, byteStart, (3 * n) >> 2);
   let i = 0;
   let w = 0;
@@ -654,21 +665,11 @@ const copyLuma = (
   // Native luma may already be the decoder arena. Preserve that zero-copy path while sharing
   // every packed/planar conversion with alternate generated scanner backends.
   if (data === out && !offset && stride === width && step === 1) return;
-  if (
-    step === 4 &&
-    LITTLE_ENDIAN &&
-    stride === width * 4 &&
-    ((data.byteOffset + offset) & 3) === 0
-  ) {
+  if (step === 4 && isLE && stride === width * 4 && ((data.byteOffset + offset) & 3) === 0) {
     copyWords(out, data, data.byteOffset + offset, width * height);
     return;
   }
-  if (
-    step === 3 &&
-    LITTLE_ENDIAN &&
-    stride === width * 3 &&
-    ((data.byteOffset + offset) & 3) === 0
-  ) {
+  if (step === 3 && isLE && stride === width * 3 && ((data.byteOffset + offset) & 3) === 0) {
     copyTriples(out, data, data.byteOffset + offset, width * height);
     return;
   }
@@ -934,7 +935,7 @@ const edgePitch = (layer: ScannerLayer, first: Pattern, second: Pattern, inverte
   return firstPitch && secondPitch ? (firstPitch + secondPitch) / 2 : 0;
 };
 // Double a layer's finder records, up to one per 7x7 cell of the staged frame.
-const growFinders = (layer: ScannerLayer): Float64Array => {
+const growFinders = (layer: TArg<ScannerLayer>): TRet<Float64Array> => {
   const centers = Math.ceil(layer.width / 7) * Math.ceil(layer.height / 7);
   const count = layer.inverted.length;
   if (count >= centers)
@@ -998,7 +999,7 @@ const scanRows = {
   ) {
     // Whole words when rows keep word alignment: one word from each source row holds four
     // pixels, summed in two 16-bit lanes to produce two output pixels.
-    if (LITTLE_ENDIAN && (width & 3) === 0 && (dstWidth & 1) === 0 && (src.byteOffset & 3) === 0) {
+    if (isLE && (width & 3) === 0 && (dstWidth & 1) === 0 && (src.byteOffset & 3) === 0) {
       const words = new Int32Array(src.buffer, src.byteOffset, (width * (to << 1)) >> 2);
       const wordsPerRow = width >> 2;
       const pairs = dstWidth >> 1;
@@ -1423,7 +1424,7 @@ export class _QRScanner {
         cuts,
         height: 0,
         luma,
-        lumaWords: LITTLE_ENDIAN
+        lumaWords: isLE
           ? new Int32Array(luma.buffer, luma.byteOffset, luma.length >> 2)
           : undefined,
         patternCount: 0,
@@ -2178,8 +2179,8 @@ export class _QRScanner {
   // fails only at the format and data bits, so a failed read is retried on the transposed
   // grid, which is the upright symbol. The symbology expects a reader to read mirror images;
   // a camera plane can arrive mirrored with no metadata saying so.
-  private decodeGrid(size: number, ctx: Ctx): Attempt {
-    const result = this.decodeOriented(size, ctx);
+  private decodeGrid(size: number): Attempt {
+    const result = this.decodeOriented(size);
     if (!(result instanceof Error)) return result;
     const grid = this.grid;
     for (let y = 1; y < size; y++)
@@ -2190,11 +2191,11 @@ export class _QRScanner {
         grid[a] = grid[b];
         grid[b] = t;
       }
-    const mirrored = this.decodeOriented(size, ctx);
+    const mirrored = this.decodeOriented(size);
     return mirrored instanceof Error ? result : mirrored;
   }
 
-  private decodeOriented(size: number, _ctx: Ctx): Attempt {
+  private decodeOriented(size: number): Attempt {
     let decoded: Attempt = FAIL.format;
     if (!checkVersion(this.grid, size)) decoded = FAIL.version;
     else {
@@ -2527,10 +2528,10 @@ export class _QRScanner {
   }
 
   // Timing prefilter + global grid projection against one plane.
-  private projectMap(s: Plane, map: Float64Array, size: number, ctx: Ctx): Attempt {
+  private projectMap(s: Plane, map: Float64Array, size: number): Attempt {
     const ok = this.timing(s, map, size);
     if (ok) this.projectQuad(s, map, size, 0, size, 0, size);
-    return ok ? this.decodeGrid(size, ctx) : FAIL.timing;
+    return ok ? this.decodeGrid(size) : FAIL.timing;
   }
 
   // Sample only timing and redundant version bits to gate expensive Version 7+ tiled projection.
@@ -2644,12 +2645,12 @@ export class _QRScanner {
           this.mapFinderQuad(map, size, t, brX, brY);
           const version = (size - 17) / 4;
           if (version < 7) {
-            failed = this.projectMap(p, map, size, ctx);
+            failed = this.projectMap(p, map, size);
             if (!(failed instanceof Error)) break project;
             // Blurred Versions 1--6 still require fine-plane sampling; tiled high-version logic
             // must not bypass it.
             if (this.upgrade(p, map, ctx)) {
-              failed = this.projectMap(this.finePlane, this.to, size, ctx);
+              failed = this.projectMap(this.finePlane, this.to, size);
               // Keep the labeled exit success-gated; the pre-inline return was one statement.
               if (!(failed instanceof Error)) break project;
             }
@@ -2770,16 +2771,16 @@ export class _QRScanner {
                     ctx
                   );
                 }
-                failed = this.decodeGrid(size, ctx);
+                failed = this.decodeGrid(size);
               }
               if (!(failed instanceof Error)) {
                 break project;
               }
               // A false local alignment can corrupt a valid global projection; rebuild that grid.
-              failed = this.projectMap(sp, sm, size, ctx);
+              failed = this.projectMap(sp, sm, size);
               if (!(failed instanceof Error)) break project;
               if (fine) {
-                failed = this.projectMap(p, map, size, ctx);
+                failed = this.projectMap(p, map, size);
                 if (!(failed instanceof Error)) break project;
               }
             } else failed = FAIL.version;
